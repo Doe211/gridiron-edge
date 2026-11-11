@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gridiron Edge</title>
+<meta name="description" content="Model predictions for NFL, college football, NBA and MLB games, compared with the Vegas lines. Make your own picks and see who does better.">
+<meta name="theme-color" content="#0b1420">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <img src="icon.svg" alt="" width="32" height="32">
+    <span>Gridiron Edge</span>
+  </div>
+  <nav class="leagues" role="tablist" aria-label="Sport">
+    <button data-league="nfl">NFL</button>
+    <button data-league="college">College</button>
+    <button data-league="nba">NBA</button>
+    <button data-league="mlb">MLB</button>
+  </nav>
+  <button class="icon-btn" id="about-btn" aria-label="How the model works">?</button>
+</header>
+
+<nav class="tabs" aria-label="Sections">
+  <button data-tab="week">This Week</button>
+  <button data-tab="results">Results</button>
+  <button data-tab="scorecard">Scorecard</button>
+  <button data-tab="ratings">Power Ratings</button>
+</nav>
+
+<main id="main" aria-live="polite"></main>
+
+<footer class="foot">
+  <p id="updated"></p>
+  <p>For entertainment only. Gridiron Edge doesn't take bets or handle money. If gambling stops being fun, call 1-800-GAMBLER.</p>
+</footer>
+
+<dialog id="about">
+  <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+  <h2>How the model works</h2>
+  <p>Every team has a power rating in points. The model predicts each game by subtracting the two ratings and adding a few points for the home team. After every game, both teams' ratings move a little toward what actually happened. Big blowouts are capped so one game doesn't count too much.</p>
+  <p>In the NFL, the model also gives a small edge to the team with more rest, and takes 2 points off a team starting someone other than its regular quarterback. For the NBA, it predicts total points from each team's offense and defense.</p>
+  <h3>How good is it?</h3>
+  <p>In tests on the 2021–2025 NFL seasons, the model picked the winner about 61–67% of the time. Against the spread it was right about half the time, the same as a coin flip. Betting lines are very hard to beat, so treat the model's picks as an opinion, not a sure thing. The Scorecard shows every league's real record.</p>
+  <h3>Highlighted picks</h3>
+  <p>A pick is highlighted in green when the model disagrees with Vegas by a lot: 3+ points on the spread, 5+ points on an NBA total, or 5+ points of win chance in MLB. That marks a big disagreement, not a better bet.</p>
+  <h3>Your picks</h3>
+  <p>Your picks are saved in this browser only. Picks lock when the game starts.</p>
+  <h3>Data</h3>
+  <p>NFL data from nflverse. College data from CollegeFootballData.com. NBA games from balldontlie.io. MLB games from MLB's public stats service. NBA and MLB betting lines from The Odds API. Lines marked “Adjusted line” were set by Gridiron Edge. Lines change during the week, so the line shown may differ from what a sportsbook offers right now.</p>
+  <h3>For entertainment</h3>
+  <p>Only risk what you can afford to lose. If gambling stops being fun, help is available 24/7 at 1-800-GAMBLER.</p>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

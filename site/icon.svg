@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f7a45"/>
+      <stop offset="1" stop-color="#0f4d2b"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <g stroke="#ffffff" stroke-opacity=".18" stroke-width="1.5">
+    <line x1="0" y1="20" x2="64" y2="20"/><line x1="0" y1="34" x2="64" y2="34"/><line x1="0" y1="48" x2="64" y2="48"/>
+  </g>
+  <g transform="rotate(-30 30 36)">
+    <ellipse cx="30" cy="36" rx="17" ry="10.5" fill="#8a4a24" stroke="#5c2f15" stroke-width="1.5"/>
+    <line x1="22" y1="36" x2="38" y2="36" stroke="#fff" stroke-width="1.8"/>
+    <g stroke="#fff" stroke-width="1.5"><line x1="25" y1="33" x2="25" y2="39"/><line x1="28.3" y1="33" x2="28.3" y2="39"/><line x1="31.7" y1="33" x2="31.7" y2="39"/><line x1="35" y1="33" x2="35" y2="39"/></g>
+  </g>
+  <polyline points="10,52 26,40 36,44 54,16" fill="none" stroke="#f5c542" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="48,14 58,12 56,22" fill="#f5c542"/>
+</svg>
