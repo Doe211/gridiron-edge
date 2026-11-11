@@ -1,4 +1,7 @@
 {
- "errors": {},
- "updated": "2026-11-11T21:48:36Z"
+ "errors": {
+  "college": "no CollegeFootballData.com key",
+  "nba": "no balldontlie.io key"
+ },
+ "updated": "2026-11-11T21:52:36Z"
 }
