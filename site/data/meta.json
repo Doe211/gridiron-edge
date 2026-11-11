@@ -1,7 +1,7 @@
 {
- "errors": {
-  "college": "no CollegeFootballData.com key",
-  "nba": "no balldontlie.io key"
- },
- "updated": "2026-11-11T21:52:36Z"
+ "errors": {},
+ "updated": "2026-11-11T22:10:46Z",
+ "odds_nba_last": "2026-11-11T22:10:46Z",
+ "odds_credits_left": 491,
+ "odds_mlb_last": "2026-11-11T22:10:46Z"
 }
