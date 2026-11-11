@@ -148,3 +148,14 @@ dialog p { margin: 4px 0; color: var(--text); }
   .card { padding: 14px; }
   .row { padding: 10px 14px; }
 }
+
+/* Administrator */
+.admin-btn { border: 1px dashed var(--orange); background: none; color: var(--orange); border-radius: 10px; padding: 6px 12px; font-weight: 700; font-size: 13px; }
+.field { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 14px 0 4px; }
+.field select, .field input { display: block; width: 100%; margin-top: 6px; font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.pick.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.status { color: var(--orange); font-size: 14px; min-height: 1em; margin: 10px 0 0; }
+#admin .row .t { font-size: 14px; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--header); color: var(--header-text); padding: 12px 18px; border-radius: 12px; font-size: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.3); z-index: 50; max-width: calc(100% - 32px); }
+[hidden] { display: none !important; }

@@ -56,6 +56,51 @@
   <p>Only risk what you can afford to lose. If gambling stops being fun, help is available 24/7 at 1-800-GAMBLER.</p>
 </dialog>
 
+<dialog id="adjust">
+  <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+  <h2>Adjust line</h2>
+  <p class="sub" id="adj-title"></p>
+  <label class="field">Spread
+    <select id="adj-fav"></select>
+  </label>
+  <label class="field" id="adj-points-row">Points
+    <input id="adj-points" type="number" inputmode="decimal" step="0.5" min="0" placeholder="3.5">
+  </label>
+  <p class="note" id="adj-vegas-spread"></p>
+  <div id="adj-total-row">
+    <label class="field">Over/under
+      <input id="adj-total" type="number" inputmode="decimal" step="0.5" min="0" placeholder="228.5">
+    </label>
+    <p class="note" id="adj-vegas-total"></p>
+  </div>
+  <p class="status" id="adj-status" role="status"></p>
+  <div class="dialog-actions">
+    <button class="pick" id="adj-vegas">Use the Vegas lines</button>
+    <button class="pick primary" id="adj-save">Save</button>
+  </div>
+</dialog>
+
+<dialog id="admin">
+  <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+  <h2>Administrator</h2>
+  <div id="admin-setup">
+    <p>Paste your GitHub admin key to adjust lines on this device. It stays in this browser only.</p>
+    <label class="field">Admin key
+      <input id="admin-token" type="password" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="dialog-actions"><button class="pick primary" id="admin-save">Connect</button></div>
+  </div>
+  <div id="admin-connected" hidden>
+    <p>Admin mode is on. Each upcoming game has an <b>Adjust line</b> button.</p>
+    <h3>Adjusted lines</h3>
+    <div class="table" id="admin-list"></div>
+    <div class="dialog-actions"><button class="pick" id="admin-off">Turn off admin mode on this device</button></div>
+  </div>
+  <p class="status" id="admin-status" role="status"></p>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
 <script src="app.js"></script>
 </body>
 </html>

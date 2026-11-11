@@ -97,7 +97,7 @@ function applyOverrides(games) {
   return games.map((g) => {
     const o = state.overrides[g.id];
     if (!o) return g;
-    const c = { ...g, adjusted: true };
+    const c = { ...g, adjusted: true, vegas_spread: g.spread, vegas_total: g.total };
     if (o.spread != null) c.spread = o.spread;
     if (o.total != null) c.total = o.total;
     return c;
@@ -171,7 +171,7 @@ function gameCard(g) {
       stats += stat("Model likes", `${shortName(team(g, lean.side))} +${Math.round(lean.gap * 100)} pts`, lean.gap >= MLB_HIGHLIGHT);
     } else stats += stat("Vegas", "No line yet");
   } else {
-    if (pickMode() === "spread") stats += stat("Vegas line", lineText(g));
+    if (pickMode() === "spread") stats += stat(g.adjusted && g.spread !== g.vegas_spread ? "Line (adjusted)" : "Vegas line", lineText(g));
     stats += stat("Model", modelText(g));
     const p = modelSpreadPick(g), e = edge(g);
     if (p) stats += stat("Model likes", `${shortName(team(g, p))} ${lineFor(g, p)} (${e.toFixed(1)} pts)`, e >= SPREAD_HIGHLIGHT);
@@ -195,6 +195,7 @@ function gameCard(g) {
     <div class="stats">${stats}</div>
     ${totals}
     ${g.adjusted ? '<span class="adjusted">✎ Adjusted line</span>' : ""}
+    ${adminToken() && !locked && state.league !== "mlb" ? `<div class="picks"><button class="admin-btn" data-adjust="${esc(g.id)}">✎ Adjust line</button></div>` : ""}
     ${g.notes?.length ? `<ul class="notes">${g.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
     ${pickBtns}
   </article>`;
@@ -345,7 +346,8 @@ async function loadLeague(league) {
   if (state.data[league]) return;
   try {
     const d = await fetchJSON(`data/${league}.json`);
-    d.games = applyOverrides(d.games);
+    d.raw = d.games;
+    d.games = applyOverrides(d.raw);
     state.data[league] = d;
   } catch {
     state.data[league] = { error: `${LEAGUES[league]} games aren't available right now. Please try again later.` };
@@ -360,14 +362,160 @@ document.addEventListener("click", (e) => {
   else if (b.dataset.pick) setPick("picks", b.dataset.id, b.dataset.pick);
   else if (b.dataset.total) setPick("totals", b.dataset.id, b.dataset.total);
   else if (b.id === "about-btn") $("#about").showModal();
+  else if (b.dataset.adjust) openAdjust(b.dataset.adjust);
+  else if (b.dataset.removeAdj) saveLine(b.dataset.removeAdj, null).then(renderAdminList);
+  else if (b.id === "adj-save") submitAdjust(false);
+  else if (b.id === "adj-vegas") submitAdjust(true);
+  else if (b.id === "admin-save") connectAdmin();
+  else if (b.id === "admin-off") { save("admin_token", null); $("#admin").close(); render(); }
 });
-document.addEventListener("change", (e) => { if (e.target.id === "week") { state.week = Number(e.target.value); render(); } });
+document.addEventListener("change", (e) => {
+  if (e.target.id === "week") { state.week = Number(e.target.value); render(); }
+  if (e.target.id === "adj-fav") $("#adj-points-row").hidden = e.target.value === "pick";
+});
+window.addEventListener("hashchange", () => { if (location.hash === "#admin") openAdmin(); });
 
 (async function start() {
   if (!LEAGUES[state.league]) state.league = "nfl";
   if (!["week", "results", "scorecard", "ratings"].includes(state.tab)) state.tab = "week";
   render();
   try { state.overrides = await fetchJSON("lines.json"); } catch { state.overrides = {}; }
+  // The administrator sees the newest lines right away, before the site finishes republishing.
+  if (adminToken()) {
+    try {
+      const r = await gh(`contents/${LINES_PATH}?ref=main&t=${Date.now()}`, { cache: "no-store" });
+      if (r.ok) { const f = await r.json(); state.overrides = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, "")))) || "{}"); }
+    } catch { /* fall back to the published file */ }
+  }
   await loadLeague(state.league);
   render();
+  if (location.hash === "#admin") openAdmin();
 })();
+
+// ---------- administrator: adjust lines from the website ----------
+// Saving writes site/lines.json in the GitHub project using a key that's kept only in the
+// administrator's own browser. GitHub then republishes the site for everyone (about 2 minutes).
+const REPO = "Doe211/gridiron-edge", LINES_PATH = "site/lines.json";
+const adminToken = () => load("admin_token", null);
+
+function gh(path, opts = {}) {
+  return fetch(`https://api.github.com/repos/${REPO}/${path}`, {
+    ...opts,
+    headers: { Authorization: `Bearer ${adminToken()}`, Accept: "application/vnd.github+json", ...(opts.headers || {}) },
+  });
+}
+
+function openAdmin() {
+  $("#admin-status").textContent = "";
+  $("#admin-token").value = "";
+  $("#admin-connected").hidden = !adminToken();
+  $("#admin-setup").hidden = !!adminToken();
+  if (adminToken()) renderAdminList();
+  $("#admin").showModal();
+}
+
+async function connectAdmin() {
+  const token = $("#admin-token").value.trim();
+  if (!token) return;
+  $("#admin-status").textContent = "Checking…";
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}`, { headers: { Authorization: `Bearer ${token}` } });
+    const info = r.ok ? await r.json() : null;
+    if (!info || !info.permissions || !info.permissions.push) throw new Error();
+    save("admin_token", token);
+    $("#admin-status").textContent = "";
+    $("#admin-setup").hidden = true;
+    $("#admin-connected").hidden = false;
+    renderAdminList();
+    render();
+  } catch {
+    $("#admin-status").textContent = "That key didn't work. Check that it's for the gridiron-edge project with Contents set to “Read and write”.";
+  }
+}
+
+function renderAdminList() {
+  const ids = Object.keys(state.overrides);
+  const all = Object.values(state.data).flatMap((d) => d.raw || []);
+  $("#admin-list").innerHTML = ids.length ? ids.map((id) => {
+    const g = all.find((x) => x.id === id), o = state.overrides[id];
+    const what = [o.spread != null ? `spread ${o.spread === 0 ? "pick'em" : o.spread > 0 ? `${g ? g.home : "home"} -${pts(o.spread)}` : `${g ? g.away : "away"} -${pts(-o.spread)}`}` : "", o.total != null ? `total ${pts(o.total)}` : ""].filter(Boolean).join(", ");
+    return `<div class="row"><span class="t">${g ? `${esc(g.away)} at ${esc(g.home)}` : esc(id)}<br><span class="r">${esc(what)}</span></span><button class="pick" data-remove-adj="${esc(id)}">Undo</button></div>`;
+  }).join("") : `<div class="row"><span class="t r">No adjusted lines right now.</span></div>`;
+}
+
+let adjusting = null;
+function openAdjust(id) {
+  const g = D().games.find((x) => x.id === id);
+  if (!g) return;
+  adjusting = g;
+  const vs = g.adjusted ? g.vegas_spread : g.spread, vt = g.adjusted ? g.vegas_total : g.total;
+  $("#adj-title").textContent = `${fullName(g.away)} at ${fullName(g.home)}`;
+  $("#adj-fav").innerHTML = `<option value="away">${esc(g.away)} favored</option><option value="home">${esc(g.home)} favored</option><option value="pick">Pick'em</option>`;
+  $("#adj-fav").value = g.spread == null ? "home" : g.spread > 0 ? "home" : g.spread < 0 ? "away" : "pick";
+  $("#adj-points").value = g.spread ? pts(Math.abs(g.spread)) : "";
+  $("#adj-points-row").hidden = $("#adj-fav").value === "pick";
+  $("#adj-vegas-spread").textContent = `Vegas: ${vs == null ? "no line" : lineText({ ...g, spread: vs })}`;
+  $("#adj-total-row").hidden = !D().has_totals;
+  $("#adj-total").value = g.total != null ? pts(g.total) : "";
+  $("#adj-vegas-total").textContent = `Vegas: ${vt == null ? "no line" : pts(vt)}`;
+  $("#adj-status").textContent = "";
+  $("#adjust").showModal();
+}
+
+async function submitAdjust(useVegas) {
+  const g = adjusting;
+  const vs = g.adjusted ? g.vegas_spread : g.spread, vt = g.adjusted ? g.vegas_total : g.total;
+  let entry = null;
+  if (!useVegas) {
+    const fav = $("#adj-fav").value, p = parseFloat($("#adj-points").value);
+    if (fav !== "pick" && !(p >= 0)) { $("#adj-status").textContent = "Enter the points, like 3.5."; return; }
+    const spread = fav === "pick" ? 0 : fav === "home" ? Math.abs(p) : -Math.abs(p);
+    entry = {};
+    if (spread !== vs) entry.spread = spread;
+    const t = parseFloat($("#adj-total").value);
+    if (D().has_totals && t > 0 && t !== vt) entry.total = t;
+    if (!Object.keys(entry).length) entry = null;
+  }
+  $("#adj-status").textContent = "Saving…";
+  const ok = await saveLine(g.id, entry);
+  if (ok) $("#adjust").close();
+}
+
+async function saveLine(id, entry) {
+  const setStatus = (t) => { const el = $("#adjust").open ? $("#adj-status") : $("#admin-status"); el.textContent = t; };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const cur = await gh(`contents/${LINES_PATH}?ref=main&t=${Date.now()}`, { cache: "no-store" });
+      if (cur.status === 401 || cur.status === 403) { setStatus("Your admin key has expired or was removed. Open the admin panel (add #admin to the address) and connect again."); return false; }
+      const file = await cur.json();
+      const lines = JSON.parse(decodeURIComponent(escape(atob(file.content.replace(/\n/g, "")))) || "{}");
+      if (entry) lines[id] = entry; else delete lines[id];
+      const body = JSON.stringify(lines, null, 2) + "\n";
+      const put = await gh(`contents/${LINES_PATH}`, {
+        method: "PUT",
+        body: JSON.stringify({ message: entry ? `Adjust line for ${id}` : `Use Vegas line for ${id}`, content: btoa(unescape(encodeURIComponent(body))), sha: file.sha, branch: "main" }),
+      });
+      if (put.status === 409) continue; // someone else saved at the same moment: try again
+      if (!put.ok) throw new Error(put.status);
+      state.overrides = lines;
+      for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
+      render();
+      setStatus("");
+      toast("Saved. Everyone will see the new line in about 2 minutes.");
+      return true;
+    } catch {
+      setStatus("Couldn't save. Check your internet connection and try again.");
+      return false;
+    }
+  }
+  setStatus("Couldn't save. Try again.");
+  return false;
+}
+
+function toast(text) {
+  const t = $("#toast");
+  t.textContent = text;
+  t.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { t.hidden = true; }, 5000);
+}

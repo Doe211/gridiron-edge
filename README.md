@@ -7,7 +7,10 @@ Visitors make their own picks and see how they do against the model.
 
 ## Adjusting a line (administrator)
 
-Open `site/lines.json` on GitHub, click the pencil icon, edit, and click **Commit changes**.
+**Easiest:** open https://doe211.github.io/gridiron-edge/#admin, connect your admin key once,
+then tap **Adjust line** on any upcoming game.
+
+**Or by hand:** open `site/lines.json` on GitHub, click the pencil icon, edit, and click **Commit changes**.
 The website updates for everyone in about a minute.
 
 Each entry uses the game's ID. `spread` is how many points the **home** team is favored by
