@@ -14,6 +14,8 @@ const state = {
   data: {},
   overrides: {},
   settings: {}, // administrator settings, e.g. { picks_close: "2026-11-15T18:00:00Z" }
+  myTickets: {}, // league -> tickets placed from this device
+  myLegs: {},    // league -> { picks: {game: side}, totals: {game: over/under} } from those tickets
 };
 
 // ---------- storage (works even when the browser blocks it) ----------
@@ -24,8 +26,16 @@ function load(key, fallback) {
 function save(key, value) {
   try { localStorage.setItem("ge_" + key, JSON.stringify(value)); } catch { /* private mode */ }
 }
-// This player's picks, kept in the browser as a quick copy of what's saved in the database.
-const picks = (kind) => load(`${kind}_${state.league}`, {});
+// Picks on the tickets this device has placed (used by Results and the Scorecard).
+const picks = (kind) => (state.myLegs[state.league] || {})[kind] || {};
+// The ticket being built on This Week, before it's placed. kind: "picks" (teams) or "totals".
+const draft = (kind) => load(`draft_${kind}_${state.league}`, {});
+
+// Tickets: 3 to 8 picks, all must win. Pays this many coins per coin wagered (plus the wager back).
+const PAYOUT = { 3: 5.5, 4: 10, 5: 15, 6: 30, 7: 80, 8: 150 };
+const COIN = "🪙";
+const MIN_LEGS = 3, MAX_LEGS = 8, MAX_WAGER = 100;
+const coins = (n) => `${Number.isInteger(n) ? n : n.toFixed(1)} ${COIN}`;
 
 // ---------- helpers ----------
 const $ = (s) => document.querySelector(s);
@@ -160,7 +170,7 @@ function when(g) {
 }
 
 function gameCard(g) {
-  const locked = isLocked(g), mine = picks("picks")[g.id], myTotal = picks("totals")[g.id];
+  const locked = isLocked(g), mine = draft("picks")[g.id], myTotal = draft("totals")[g.id];
   const teamBtn = (side) => `<button class="team-pick" data-pick="${side}" data-id="${esc(g.id)}" aria-pressed="${mine === side}" ${locked ? "disabled" : ""}>
       <span class="tp-name">${esc(fullName(team(g, side)))}</span>
       <span class="tp-line">${g.spread != null ? esc(lineFor(g, side)) : ""}</span>
@@ -188,11 +198,9 @@ function renderWeek() {
     const t = dl.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     html += picksClosed() ? `<div class="deadline closed">🔒 Picks are closed.</div>` : `<div class="deadline">⏰ Picks close ${esc(t)}</div>`;
   }
-  const name = playerName();
-  const num = load("player_number", null);
-  html += `<div class="player">${name ? `Your ticket${num ? ` <b>#${num}</b>` : ""} · <b>${esc(name)}</b> · <button class="link" id="change-name">Change name</button><br><small>Your ticket belongs to this device and browser. Only this device can change its picks.</small>` : "Your first pick starts your ticket. It belongs to this device and browser."}</div>`;
+  html += `<p class="note">Build a ticket: tap ${MIN_LEGS} to ${MAX_LEGS} picks (teams against the spread and Over/Under totals), choose your wager, and place it. Every pick must win. Once placed, a ticket can't be changed.</p>`;
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
-  html += `<p class="note">Tap a team to pick it${pickMode() === "spread" ? " against the spread" : ""}, and tap Over or Under for the total. Tap again to change your mind. Each game locks when it starts${dl ? ", and all picks lock at the deadline" : ""}.</p>`;
+  html += ticketBar();
   return html;
 }
 
@@ -320,7 +328,7 @@ function render() {
   if (d.error) { main.innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
   let html = d.message ? `<div class="warn">${esc(d.message)}</div>` : "";
   if (state.tab === "picks" && !isAdmin()) state.tab = "week";
-  html += { week: renderWeek, results: renderResults, scorecard: renderScorecard, ratings: renderRatings, picks: renderAllPicks }[state.tab]();
+  html += { week: renderWeek, tickets: renderMyTickets, results: renderResults, scorecard: renderScorecard, ratings: renderRatings, picks: renderAllPicks }[state.tab]();
   main.innerHTML = html;
   const updated = new Date(d.updated);
   $("#updated").textContent = `${LEAGUES[state.league]} data updated ${updated.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}.`;
@@ -347,12 +355,15 @@ async function loadLeague(league) {
 document.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  if (b.dataset.league) { state.league = b.dataset.league; state.week = null; state.allPicks = null; save("league", state.league); render(); loadLeague(state.league).then(() => { render(); loadMyPicks(); if (state.tab === "picks") loadAllPicks(); }); }
+  if (b.dataset.league) { state.league = b.dataset.league; state.week = null; state.allPicks = null; save("league", state.league); render(); loadLeague(state.league).then(() => { render(); loadMyTickets(); if (state.tab === "picks") loadAllPicks(); }); }
   else if (b.dataset.tab) { state.tab = b.dataset.tab; save("tab", state.tab); render(); window.scrollTo({ top: 0 }); if (state.tab === "picks") loadAllPicks(); }
   else if (b.dataset.pick) setPick("side", b.dataset.id, b.dataset.pick);
   else if (b.dataset.total) setPick("total", b.dataset.id, b.dataset.total);
   else if (b.id === "about-btn") $("#about").showModal();
-  else if (b.id === "change-name") askName(true);
+  else if (b.id === "ticket-review") openReview();
+  else if (b.id === "ticket-clear") { clearDraft(); render(); }
+  else if (b.id === "review-place") placeTicket();
+  else if (b.dataset.void) { if (b.dataset.armed) voidTicket(Number(b.dataset.void)); else { b.dataset.armed = "1"; b.textContent = "Tap again to void"; } }
   else if (b.dataset.adjust) openAdjust(b.dataset.adjust);
   else if (b.dataset.removeAdj) saveLine(b.dataset.removeAdj, null).then(renderAdminList);
   else if (b.id === "adj-save") submitAdjust(false);
@@ -371,10 +382,14 @@ document.addEventListener("click", (e) => {
 document.addEventListener("change", (e) => {
   if (e.target.id === "week") { state.week = Number(e.target.value); render(); }
   if (e.target.id === "picks-week") { state.picksWeek = Number(e.target.value); render(); }
+  if (e.target.id === "wager") {
+    const v = Math.max(1, Math.min(MAX_WAGER, Math.round(Number(e.target.value) || 1)));
+    save("wager", v); render();
+  }
   if (e.target.id === "adj-fav") $("#adj-points-row").hidden = e.target.value === "pick";
 });
 document.addEventListener("submit", (e) => {
-  if (e.target.id === "name-form") { e.preventDefault(); nameSaved(); }
+  if (e.target.id === "review-form") { e.preventDefault(); placeTicket(); }
   if (e.target.id === "signin-form") { e.preventDefault(); adminSignIn(); }
 });
 window.addEventListener("hashchange", () => { if (location.hash === "#admin") openAdmin(); });
@@ -413,81 +428,161 @@ async function loadShared() {
   for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
 }
 
-/** Loads this player's saved picks for the current league from the database. */
-async function loadMyPicks() {
-  if (!db || !session) return;
-  const league = state.league;
-  const { data, error } = await db.from("picks").select("game_id,kind,choice").eq("league", league).eq("user_id", session.user.id);
-  if (error) return;
-  const side = {}, total = {};
-  for (const p of data) (p.kind === "side" ? side : total)[p.game_id] = p.choice;
-  save(`picks_${league}`, side);
-  save(`totals_${league}`, total);
-  if (league === state.league) render();
+// ---------- tickets ----------
+/** Legs on the ticket being built, in kickoff order. */
+function draftLegs() {
+  const legs = [];
+  for (const [kind, key] of [["side", "picks"], ["total", "totals"]]) {
+    for (const [id, choice] of Object.entries(draft(key))) {
+      const g = D().games.find((x) => x.id === id);
+      if (g && !isLocked(g)) legs.push({ game_id: id, kind, choice, g });
+    }
+  }
+  return legs.sort((a, b) => (a.g.kickoff || "").localeCompare(b.g.kickoff || ""));
+}
+const legLabel = (l, line) => l.kind === "side"
+  ? `${shortName(team(l.g, l.choice))} ${lineFor({ ...l.g, spread: line ?? l.g.spread }, l.choice)}`
+  : `${ouLabel(l.choice)} ${pts(line ?? l.g.total)} (${l.g.away} at ${l.g.home})`;
+
+function ticketBar() {
+  const legs = draftLegs(), n = legs.length, wager = load("wager", 5);
+  const ready = n >= MIN_LEGS && n <= MAX_LEGS && !picksClosed();
+  const toWin = ready ? PAYOUT[n] * wager : null;
+  return `<div class="ticket-bar">
+    <div class="tb-row"><b>Your ticket: ${n} ${n === 1 ? "pick" : "picks"}</b>
+      <span class="r">${n < MIN_LEGS ? `Pick ${MIN_LEGS - n} more to place a ticket` : n > MAX_LEGS ? `Too many picks (max ${MAX_LEGS})` : `${n} for ${n} pays ${PAYOUT[n]} to 1`}</span></div>
+    ${n ? `<div class="tb-legs">${legs.map((l) => `<span class="name-chip">${esc(legLabel(l))}</span>`).join("")}</div>` : ""}
+    <div class="tb-row">
+      <label class="tb-wager">Wager <input id="wager" type="number" inputmode="numeric" min="1" max="${MAX_WAGER}" step="1" value="${wager}"> ${COIN}</label>
+      ${toWin != null ? `<span>To win <b>${coins(toWin)}</b></span>` : ""}
+      <span class="spacer"></span>
+      ${n ? '<button class="pick" id="ticket-clear">Clear</button>' : ""}
+      <button class="pick primary" id="ticket-review" ${ready ? "" : "disabled"}>Review ticket</button>
+    </div>
+  </div>`;
 }
 
-// Asking for the player's name the first time they pick.
-let pendingPick = null;
-function askName(changing = false) {
-  $("#name-input").value = playerName();
-  $("#name-title").textContent = changing ? "Change the name on your ticket" : "Start your ticket";
-  $("#name-status").textContent = "";
-  $("#name").showModal();
-  setTimeout(() => $("#name-input").focus(), 50);
-}
-async function nameSaved() {
-  const name = $("#name-input").value.trim().slice(0, 40);
-  if (!name) { $("#name-status").textContent = "Type a name first."; return; }
-  const had = playerName();
-  save("player_name", name);
-  $("#name").close();
-  if (had && had !== name && db && session) await db.rpc("rename_me", { new_name: name });
-  render();
-  if (pendingPick) { const p = pendingPick; pendingPick = null; setPick(p.kind, p.id, p.value); }
-}
-
-/** Makes sure this player has a permanent player number, so players with the same name can be told apart. */
-async function ensurePlayer() {
-  if (!db || !session || !playerName()) return;
-  try {
-    const { data, error } = await db.from("players").upsert({ user_id: session.user.id, name: playerName() }).select("number").single();
-    if (!error && data) { save("player_number", data.number); render(); }
-  } catch { /* picks still work without a number */ }
-}
-
-async function setPick(kind, id, value) {
+function setPick(kind, id, value) {
   const g = D().games.find((x) => x.id === id);
   if (!g || isLocked(g)) return;
-  if (!playerName()) { pendingPick = { kind, id, value }; askName(); return; }
   const key = kind === "side" ? "picks" : "totals";
-  const mine = picks(key), before = mine[id];
-  const removing = before === value;
-  if (removing) delete mine[id]; else mine[id] = value;
-  save(`${key}_${state.league}`, mine);
+  const mine = draft(key);
+  if (mine[id] === value) delete mine[id];
+  else {
+    if (!mine[id] && draftLegs().length >= MAX_LEGS) { toast(`A ticket can have at most ${MAX_LEGS} picks.`); return; }
+    mine[id] = value;
+  }
+  save(`draft_${key}_${state.league}`, mine);
   render();
-  if (!db) return;
+}
+
+function clearDraft() {
+  save(`draft_picks_${state.league}`, {});
+  save(`draft_totals_${state.league}`, {});
+}
+
+// Placing a ticket: review, name (first time), then the database checks and records it.
+function openReview() {
+  const legs = draftLegs(), wager = Math.round(Number(load("wager", 5)));
+  if (legs.length < MIN_LEGS || legs.length > MAX_LEGS) return;
+  if (!(wager >= 1 && wager <= MAX_WAGER)) { toast(`Wager 1 to ${MAX_WAGER} ${COIN}.`); return; }
+  $("#review-legs").innerHTML = legs.map((l) => `<li>${esc(legLabel(l))}<small> · ${esc(when(l.g))}</small></li>`).join("");
+  $("#review-summary").innerHTML = `${legs.length} for ${legs.length} pays ${PAYOUT[legs.length]} to 1 · Wager <b>${coins(wager)}</b> · To win <b>${coins(PAYOUT[legs.length] * wager)}</b>`;
+  $("#review-name").value = playerName();
+  $("#review-status").textContent = "";
+  $("#review").showModal();
+}
+
+async function placeTicket() {
+  const legs = draftLegs(), wager = Math.round(Number(load("wager", 5)));
+  const name = $("#review-name").value.trim().slice(0, 40);
+  if (!name) { $("#review-status").textContent = "Enter a name for your ticket."; return; }
+  save("player_name", name);
+  if (!db) { $("#review-status").textContent = "Tickets aren't available right now."; return; }
+  $("#review-place").disabled = true;
+  $("#review-status").textContent = "Placing your ticket…";
   try {
     if (!session) {
       const { data, error } = await db.auth.signInAnonymously();
       if (error) throw error;
       session = data.session;
     }
-    if (!load("player_number", null)) await ensurePlayer();
-    const q = db.from("picks");
-    const res = removing
-      ? await q.delete().eq("user_id", session.user.id).eq("game_id", id).eq("kind", kind)
-      : await q.upsert({
-          user_id: session.user.id, name: playerName(), league: state.league, game_id: id,
-          matchup: `${g.away} at ${g.home}`, kind, choice: value,
-          line: kind === "side" ? g.spread : g.total, kickoff: g.kickoff, updated_at: new Date().toISOString(),
-        });
-    if (res.error) throw res.error;
-  } catch (err) {
-    if (before === undefined) delete mine[id]; else mine[id] = before;
-    save(`${key}_${state.league}`, mine);
+    const { data, error } = await db.rpc("place_ticket", {
+      p_name: name, p_league: state.league, p_wager: wager,
+      p_picks: legs.map((l) => ({ game_id: l.game_id, kind: l.kind, choice: l.choice })),
+    });
+    if (error) throw error;
+    clearDraft();
+    $("#review").close();
+    toast(`Ticket #${data} placed. Good luck!`);
+    await loadMyTickets();
     render();
-    toast(String(err && err.message || "").includes("row-level security") ? "Picks are closed for this game." : "Couldn't save your pick. Check your connection and try again.");
+  } catch (err) {
+    const msg = String(err && err.message || "");
+    $("#review-status").textContent = /closed|started|no line|needs|Wager|Unknown/.test(msg)
+      ? msg.replace(/^.*?:\s*/, "") : "Couldn't place your ticket. Check your connection and try again.";
+  } finally {
+    $("#review-place").disabled = false;
   }
+}
+
+/** Grades a ticket. Any losing pick loses it; a push drops that pick and pays the smaller ticket;
+ *  fewer than 3 winners left returns the wager. */
+function gradeTicket(t, legs, games) {
+  let wins = 0, lost = false, pending = false;
+  for (const l of legs) {
+    const r = pickResult(games.get(l.game_id), l);
+    if (r === false) lost = true;
+    else if (r === true) wins++;
+    else if (r === undefined) pending = true;
+  }
+  if (lost) return { status: "lost", net: -t.wager, label: "Lost" };
+  if (pending) return { status: "pending", net: 0, label: "Pending" };
+  if (wins < MIN_LEGS) return { status: "refund", net: 0, label: "Wager returned" };
+  return { status: "won", net: PAYOUT[wins] * t.wager, label: `Won ${wins} for ${wins}` };
+}
+
+/** Loads the tickets placed from this device for the current league. */
+async function loadMyTickets() {
+  if (!db || !session) return;
+  const league = state.league;
+  const { data, error } = await db.from("tickets").select("number,name,league,wager,legs,placed_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
+    .eq("league", league).eq("user_id", session.user.id).order("placed_at", { ascending: false });
+  if (error) return;
+  state.myTickets[league] = data;
+  const side = {}, total = {};
+  for (const t of data.slice().reverse()) for (const l of t.ticket_picks) (l.kind === "side" ? side : total)[l.game_id] = l.choice;
+  state.myLegs[league] = { picks: side, totals: total };
+  if (league === state.league) render();
+}
+
+function ticketCard(t, games, admin = false) {
+  const legs = t.ticket_picks || [];
+  const grade = gradeTicket(t, legs, games);
+  const placed = new Date(t.placed_at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return `<article class="card ticket ${grade.status}">
+    <div class="card-head"><span class="matchup">Ticket #${t.number}${admin ? ` · ${esc(t.name)}` : ""}</span><span class="when">Placed ${esc(placed)}</span></div>
+    <ul class="legs">${legs.slice().sort((a, b) => (a.kickoff || "").localeCompare(b.kickoff || "")).map((l) => {
+      const g = games.get(l.game_id), r = pickResult(g, l);
+      const label = g ? legLabel({ ...l, g }, Number(l.line)) : `${l.matchup}: ${l.choice} ${l.line}`;
+      return `<li class="${r === false ? "out" : r === true ? "won" : ""}">${r === false ? "✗" : r === true ? "✓" : r === null ? "–" : "•"} <span class="nm">${esc(label)}</span>${g && isFinal(g) ? `<small> · Final ${g.away_score}-${g.home_score}</small>` : ""}</li>`;
+    }).join("")}</ul>
+    <div class="tb-row"><span>Wager <b>${coins(t.wager)}</b> · ${t.legs} for ${t.legs} pays ${PAYOUT[t.legs]} to 1</span><span class="spacer"></span>
+      <span class="status-pill ${grade.status}">${esc(grade.label)}${grade.status === "won" ? ` +${coins(grade.net)}` : grade.status === "lost" ? ` −${coins(t.wager)}` : ""}</span>
+      ${admin ? `<button class="pick" data-void="${t.number}">Void</button>` : ""}</div>
+  </article>`;
+}
+
+function renderMyTickets() {
+  let html = `<h1>My Tickets</h1><p class="sub">Tickets placed from this device. A placed ticket can't be changed.</p>`;
+  const list = state.myTickets[state.league];
+  if (!list) return html + `<div class="empty">${session ? "Loading…" : "You haven't placed a ticket yet. Build one on This Week."}</div>`;
+  if (!list.length) return html + `<div class="empty">No ${LEAGUES[state.league]} tickets yet. Build one on This Week.</div>`;
+  const games = new Map(D().games.map((g) => [g.id, g]));
+  let net = 0;
+  for (const t of list) net += gradeTicket(t, t.ticket_picks || [], games).net;
+  html += `<div class="summary">${stat("Tickets", String(list.length))}${stat("Net", `${net >= 0 ? "+" : "−"}${coins(Math.abs(net))}`)}</div>`;
+  return html + `<div class="cards">${list.map((t) => ticketCard(t, games)).join("")}</div>`;
 }
 
 // ---------- administrator ----------
@@ -511,7 +606,7 @@ async function adminSignIn() {
   $("#admin-password").value = "";
   $("#admin-status").textContent = "";
   openAdmin();
-  await loadMyPicks();
+  await loadMyTickets();
   render();
 }
 
@@ -608,27 +703,36 @@ function renderDeadlineForm() {
     : "No deadline. Each game locks when it starts.";
 }
 
-// ---------- All Picks (administrator only) ----------
+// ---------- All Tickets (administrator only) ----------
 async function loadAllPicks() {
   if (!isAdmin()) return;
-  state.allPicksStatus = "Loading picks…";
+  state.allPicksStatus = "Loading tickets…";
   render();
   const league = state.league, rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await db.from("picks").select("name,game_id,matchup,kind,choice,line,updated_at,user_id")
-      .eq("league", league).order("updated_at", { ascending: true }).range(from, from + 999);
-    if (error) { state.allPicksStatus = "Couldn't load picks. Try again."; render(); return; }
+    const { data, error } = await db.from("tickets").select("number,name,wager,legs,placed_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
+      .eq("league", league).order("number", { ascending: true }).range(from, from + 999);
+    if (error) { state.allPicksStatus = "Couldn't load tickets. Try again."; render(); return; }
     rows.push(...data);
     if (data.length < 1000) break;
   }
   if (league !== state.league) return;
-  const numbers = {};
-  const players = await db.from("players").select("user_id,number");
-  for (const pl of players.data || []) numbers[pl.user_id] = pl.number;
-  state.playerNumbers = numbers;
   state.allPicks = rows;
   state.allPicksStatus = "";
   render();
+}
+
+async function voidTicket(number) {
+  const { error } = await db.from("tickets").delete().eq("number", number);
+  if (error) { toast("Couldn't void the ticket. Try again."); return; }
+  toast(`Ticket #${number} voided.`);
+  loadAllPicks();
+}
+
+/** A ticket's week: the week of its first game. */
+function ticketWeek(t, games) {
+  const weeks = (t.ticket_picks || []).map((l) => games.get(l.game_id)?.week).filter((w) => w != null);
+  return weeks.length ? Math.min(...weeks) : null;
 }
 
 function choiceLabel(g, p) {
@@ -647,71 +751,45 @@ function pickResult(g, p) {
   const a = actualWinner(g);
   return a ? a === p.choice : null;
 }
-const playerTag = (p) => `${state.playerNumbers?.[p.user_id] ? `#${state.playerNumbers[p.user_id]} ` : ""}${p.name}`;
-
 function renderAllPicks() {
-  let html = `<h1>All Picks</h1><p class="sub">Only you can see this page.</p>`;
+  let html = `<h1>All Tickets</h1><p class="sub">Only you can see this page.</p>`;
   if (state.allPicksStatus) return html + `<div class="empty">${esc(state.allPicksStatus)}</div>`;
-  if (!state.allPicks) return html + `<div class="empty">Loading picks…</div>`;
-  const rows = state.allPicks;
+  if (!state.allPicks) return html + `<div class="empty">Loading tickets…</div>`;
   const games = new Map(D().games.map((g) => [g.id, g]));
-  const weeks = [...new Set(rows.map((p) => games.get(p.game_id)?.week).filter((w) => w != null))].sort((a, b) => b - a);
-  if (!weeks.length) return html + `<div class="toolbar"><button class="pick" id="picks-refresh">Refresh</button></div><div class="empty">No ${LEAGUES[state.league]} picks yet.</div>`;
+  const all = state.allPicks;
+  const weeks = [...new Set(all.map((t) => ticketWeek(t, games)).filter((w) => w != null))].sort((a, b) => b - a);
+  if (!weeks.length) return html + `<div class="toolbar"><button class="pick" id="picks-refresh">Refresh</button></div><div class="empty">No ${LEAGUES[state.league]} tickets yet.</div>`;
   const w = weeks.includes(state.picksWeek) ? state.picksWeek : weeks[0];
-  const inWeek = rows.filter((p) => games.get(p.game_id)?.week === w);
-  const players = new Set(inWeek.map((p) => p.user_id));
+  const tickets = all.filter((t) => ticketWeek(t, games) === w);
+  const graded = tickets.map((t) => ({ t, grade: gradeTicket(t, t.ticket_picks || [], games) }));
+  const wagered = tickets.reduce((a, t) => a + t.wager, 0);
+  const paid = graded.filter((x) => x.grade.status === "won").reduce((a, x) => a + x.grade.net + x.t.wager, 0);
+  const count = (st) => graded.filter((x) => x.grade.status === st).length;
   html += `<div class="toolbar"><label for="picks-week">Week:</label><select id="picks-week">${weeks.map((x) => `<option value="${x}" ${x === w ? "selected" : ""}>${esc(weekLabel(x))}</option>`).join("")}</select>
     <button class="pick" id="picks-refresh">Refresh</button><button class="pick" id="picks-csv">Download spreadsheet</button></div>
-    <p class="note">${players.size} ${players.size === 1 ? "ticket" : "tickets"} with ${inWeek.length} ${inWeek.length === 1 ? "pick" : "picks"} this week.</p>`;
-  // Standings: one row per ticket. The same person on two devices has two tickets, scored separately.
-  const tickets = new Map();
-  for (const p of inWeek) {
-    if (!tickets.has(p.user_id)) tickets.set(p.user_id, { name: p.name, num: state.playerNumbers?.[p.user_id], w: 0, l: 0, push: 0, open: 0 });
-    const t = tickets.get(p.user_id), r = pickResult(games.get(p.game_id), p);
-    if (r === true) t.w++; else if (r === false) t.l++; else if (r === null) t.push++; else t.open++;
-  }
-  const standings = [...tickets.values()].sort((a, b) => b.w - a.w || a.l - b.l || (a.num ?? 0) - (b.num ?? 0));
-  html += `<h2>Tickets</h2><div class="table standings"><div class="row head"><span class="rank">#</span><span class="t">Ticket</span><span class="c">Won</span><span class="c">Lost</span><span class="c">Push</span><span class="c">Pending</span></div>`
-    + standings.map((t, i) => `<div class="row"><span class="rank">${i + 1}</span><span class="t"><b>${t.num ? `#${t.num}` : "—"}</b> ${esc(t.name)}</span><span class="c pos">${t.w}</span><span class="c neg">${t.l}</span><span class="c">${t.push}</span><span class="c r">${t.open}</span></div>`).join("")
-    + `</div><h2>Picks by game</h2><div class="cards">`;
-  const byGame = new Map();
-  for (const p of inWeek) { if (!byGame.has(p.game_id)) byGame.set(p.game_id, []); byGame.get(p.game_id).push(p); }
-  const ordered = [...byGame.keys()].sort((a, b) => (games.get(a)?.kickoff || "").localeCompare(games.get(b)?.kickoff || ""));
-  for (const id of ordered) {
-    const g = games.get(id), list = byGame.get(id);
-    const group = (kind, choice) => list.filter((p) => p.kind === kind && p.choice === choice);
-    const box = (kind, choice) => {
-      const ps = group(kind, choice);
-      const label = kind === "side" ? `${g ? fullName(team(g, choice)) : choice}` : ouLabel(choice);
-      const result = g && isFinal(g) ? (kind === "side" ? (g.spread != null ? spreadWon(g, choice) : actualWinner(g) ? actualWinner(g) === choice : null) : totalWon(g, choice)) : undefined;
-      return `<div class="pick-group"><div class="pg-head"><b>${esc(label)}</b><span class="pg-count">${ps.length}</span>${result === true ? '<span class="v yes"></span>' : result === false ? '<span class="v no"></span>' : ""}</div>
-        <div class="pg-names">${ps.length ? ps.map((p) => {
-          const r = pickResult(g, p);
-          const cls = r === false ? " out" : r === true ? " won" : "";
-          const mark = r === false ? "✗ " : r === true ? "✓ " : "";
-          const atLine = (p.kind === "side" ? g && p.line != null && Number(p.line) !== g.spread : g && p.line != null && Number(p.line) !== g.total) ? ` <small>(${esc(choiceLabel(g, p))})</small>` : "";
-          return `<span class="name-chip${cls}" title="${esc(choiceLabel(g, p))}${r === false ? " — lost" : r === true ? " — won" : ""}">${mark}<span class="nm">${esc(playerTag(p))}</span>${atLine}</span>`;
-        }).join("") : '<span class="r">No picks</span>'}</div></div>`;
-    };
-    html += `<article class="card"><div class="card-head"><span class="matchup">${g ? `${esc(fullName(g.away))} at ${esc(fullName(g.home))}` : esc(list[0].matchup || id)}</span>
-      <span class="when">${g ? esc(when(g)) : ""}${g && isFinal(g) ? ` · Final ${g.away_score}-${g.home_score}` : ""}</span></div>
-      <div class="lines"><span><span class="label">Spread</span> ${g ? esc(g.spread != null ? lineText(g) : "No line") : ""}</span><span><span class="label">Over/under</span> ${g && g.total != null ? pts(g.total) : "—"}</span></div>
-      <div class="pick-grid">${box("side", "away")}${box("side", "home")}${list.some((p) => p.kind === "total") || (g && g.total != null) ? box("total", "over") + box("total", "under") : ""}</div></article>`;
-  }
-  return html + `</div><p class="note">Each ticket has its own number, so two people with the same name, or one person with tickets on two devices, are never mixed up. A crossed-out name with ✗ is a losing pick; ✓ is a winner. A line in parentheses means the player picked before the line changed, and the pick is judged at that line.</p>`;
+    <div class="summary">${stat("Tickets", String(tickets.length))}${stat("Won", String(count("won")))}${stat("Lost", String(count("lost")))}${stat("Pending", String(count("pending")))}${stat("Wagered", coins(wagered))}${stat("Paid out", coins(paid))}</div>`;
+  const order = { won: 0, pending: 1, refund: 2, lost: 3 };
+  graded.sort((a, b) => order[a.grade.status] - order[b.grade.status] || b.grade.net - a.grade.net || a.t.number - b.t.number);
+  html += `<h2>Tickets</h2><div class="table standings"><div class="row head"><span class="t">Ticket</span><span class="c">Picks</span><span class="c">Wager</span><span class="c wide">Result</span></div>`
+    + graded.map(({ t, grade }) => `<div class="row"><span class="t"><b>#${t.number}</b> ${esc(t.name)}</span><span class="c">${t.legs}</span><span class="c">${t.wager}</span>
+      <span class="c wide status-pill ${grade.status}">${esc(grade.status === "won" ? `+${coins(grade.net)}` : grade.status === "lost" ? `−${coins(t.wager)}` : grade.label)}</span></div>`).join("") + `</div>`;
+  html += `<h2>Every ticket</h2><div class="cards">${graded.map(({ t }) => ticketCard(t, games, true)).join("")}</div>`;
+  return html + `<p class="note">A ✗ is a losing pick, which loses the whole ticket. A push drops that pick, and the ticket is paid at the smaller size; with fewer than ${MIN_LEGS} winning picks left, the wager is returned. Each pick is judged at the line when the ticket was placed. Void removes a ticket for good.</p>`;
 }
 
 function downloadPicks() {
   const games = new Map(D().games.map((g) => [g.id, g]));
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [["Name", "Ticket #", "Week", "Game", "Kickoff", "Pick type", "Pick", "Line", "Result", "Picked at"].map(q).join(",")];
-  for (const p of state.allPicks || []) {
-    const g = games.get(p.game_id);
-    const won = pickResult(g, p);
-    lines.push([p.name, state.playerNumbers?.[p.user_id] ?? "", g?.week ?? "", p.matchup, g?.kickoff ?? "", p.kind === "side" ? "Team" : "Total", choiceLabel(g, p), p.line ?? "", won === true ? "Won" : won === false ? "Lost" : won === null ? "Push" : "", p.updated_at].map(q).join(","));
+  const out = [["Ticket #", "Name", "Placed", "Wager", "Picks", "Ticket result", "Net coins", "Game", "Pick", "Line", "Pick result"].map(q).join(",")];
+  for (const t of state.allPicks || []) {
+    const grade = gradeTicket(t, t.ticket_picks || [], games);
+    for (const l of t.ticket_picks || []) {
+      const g = games.get(l.game_id), r = pickResult(g, l);
+      out.push([t.number, t.name, t.placed_at, t.wager, t.legs, grade.label, grade.net, l.matchup, choiceLabel(g, l), l.line, r === true ? "Won" : r === false ? "Lost" : r === null ? "Push" : ""].map(q).join(","));
+    }
   }
-  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: `gridiron-edge-${state.league}-picks.csv` });
+  const url = URL.createObjectURL(new Blob([out.join("\n")], { type: "text/csv" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: `gridiron-edge-${state.league}-tickets.csv` });
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -727,13 +805,12 @@ function toast(text) {
 // ---------- start ----------
 (async function start() {
   if (!LEAGUES[state.league]) state.league = "nfl";
-  if (!["week", "results", "scorecard", "ratings", "picks"].includes(state.tab)) state.tab = "week";
+  if (!["week", "tickets", "results", "scorecard", "ratings", "picks"].includes(state.tab)) state.tab = "week";
   render();
   try { await refreshSession(); } catch { /* the site still works without the database */ }
   await Promise.all([loadShared().catch(() => {}), loadLeague(state.league)]);
   render();
-  loadMyPicks();
-  if (session && playerName() && !load("player_number", null)) ensurePlayer();
+  loadMyTickets();
   if (state.tab === "picks") loadAllPicks();
   if (location.hash === "#admin") openAdmin();
   // Keep locks, the deadline and adjusted lines current while the page stays open.

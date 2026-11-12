@@ -27,10 +27,11 @@
 
 <nav class="tabs" aria-label="Sections">
   <button data-tab="week">This Week</button>
+  <button data-tab="tickets">My Tickets</button>
   <button data-tab="results">Results</button>
   <button data-tab="scorecard">Scorecard</button>
   <button data-tab="ratings">Power Ratings</button>
-  <button data-tab="picks" id="tab-picks" hidden>All Picks</button>
+  <button data-tab="picks" id="tab-picks" hidden>All Tickets</button>
 </nav>
 
 <main id="main" aria-live="polite"></main>
@@ -49,8 +50,10 @@
   <p>In tests on the 2021–2025 NFL seasons, the model picked the winner about 61–67% of the time. Against the spread it was right about half the time, the same as a coin flip. Betting lines are very hard to beat, so treat the model's picks as an opinion, not a sure thing. The Scorecard shows every league's real record.</p>
   <h3>Highlighted picks</h3>
   <p>A pick is highlighted in green when the model disagrees with Vegas by a lot: 3+ points on the spread, 5+ points on an NBA total, or 5+ points of win chance in MLB. That marks a big disagreement, not a better bet.</p>
-  <h3>Your picks</h3>
-  <p>Your picks are saved online on a ticket with its own number, under the name you enter, and the site's administrator can see them. A ticket belongs to the device and browser that made it, and only that device can change it. Picking on another device starts a separate ticket. Each game locks when it starts, and all picks lock at the deadline shown on This Week, if there is one.</p>
+  <h3>Tickets</h3>
+  <p>Build a ticket with 3 to 8 picks (teams against the spread and Over/Under totals) and wager 1 to 100 🪙. Every pick must win. 3 for 3 pays 5.5 to 1, 4 for 4 pays 10 to 1, 5 for 5 pays 15 to 1, 6 for 6 pays 30 to 1, 7 for 7 pays 80 to 1, and 8 for 8 pays 150 to 1. A push drops that pick and the ticket is paid at the smaller size; with fewer than 3 winning picks left, the wager is returned. Once placed, a ticket can't be changed. 🪙 are points for fun, not money.</p>
+  <h3>Your tickets</h3>
+  <p>Your tickets are saved online under the name you enter, and the site's administrator can see them. The My Tickets tab shows the tickets placed from this device and browser. Each game locks when it starts, and tickets close at the deadline shown on This Week, if there is one.</p>
   <h3>Data</h3>
   <p>NFL data from nflverse. College data from CollegeFootballData.com. NBA games from balldontlie.io. MLB games from MLB's public stats service. NBA and MLB betting lines from The Odds API. Lines marked “Adjusted line” were set by Gridiron Edge. Lines change during the week, so the line shown may differ from what a sportsbook offers right now.</p>
   <h3>For entertainment</h3>
@@ -116,15 +119,18 @@
   <p class="status" id="admin-status" role="status"></p>
 </dialog>
 
-<dialog id="name">
-  <form id="name-form">
-    <h2 id="name-title">Start your ticket</h2>
-    <p class="note">Enter the name for your ticket. Your ticket belongs to this device and browser: only this device can change its picks. Picking on another device starts a separate ticket with its own number.</p>
-    <label class="field">Name
-      <input id="name-input" maxlength="40" autocomplete="nickname">
+<dialog id="review">
+  <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+  <form id="review-form">
+    <h2>Review your ticket</h2>
+    <ul class="legs" id="review-legs"></ul>
+    <p id="review-summary"></p>
+    <label class="field">Name on the ticket
+      <input id="review-name" maxlength="40" autocomplete="nickname">
     </label>
-    <p class="status" id="name-status" role="status"></p>
-    <div class="dialog-actions"><button class="pick primary" id="name-save" type="submit">Save</button></div>
+    <p class="warn">Once placed, this ticket can't be changed or canceled. Every pick must win.</p>
+    <p class="status" id="review-status" role="status"></p>
+    <div class="dialog-actions"><button class="pick primary" id="review-place" type="submit">Place ticket</button></div>
   </form>
 </dialog>
 

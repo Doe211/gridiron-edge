@@ -5,12 +5,15 @@ API keys come from environment variables (GitHub secrets), never from the websit
   CFBD_KEY   CollegeFootballData.com
   BDL_KEY    balldontlie.io
   ODDS_KEY   The Odds API
+  SUPABASE_SECRET_KEY   the Gridiron Edge database (to send the schedule and lines, so tickets can be checked)
 """
 
 import json
 import os
 import sys
 import traceback
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -65,6 +68,41 @@ def finish(league, games, ratings, *, history_from, pick_mode, names=None, ranke
         "names": names or {}, "ranked": ranked, "games": shown, "message": message,
     })
     print(f"{league}: {len(shown)} games written (season {current})")
+    try:
+        sync_games(league, [g for g in games if g["season"] == current])
+    except Exception as e:  # the website still works; tickets for this league just can't be checked
+        print(f"{league}: couldn't send games to the database: {e}")
+
+
+SUPABASE_URL = "https://ryddmapuqqbuyzwvxnbe.supabase.co"
+
+
+def sync_games(league, games):
+    """Sends recent and upcoming games, with their Vegas lines, to the database, which uses them
+    to check every ticket (game not started, real current line)."""
+    key = os.environ.get("SUPABASE_SECRET_KEY", "")
+    if not key:
+        return
+    lo, hi = NOW.timestamp() - 14 * 86400, NOW.timestamp() + 45 * 86400
+    rows = []
+    for g in games:
+        k = src.parse_iso(g.get("kickoff"))
+        if not k or not (lo <= k.timestamp() <= hi):
+            continue
+        rows.append({"id": g["id"], "league": league, "kickoff": g["kickoff"], "home": g["home"], "away": g["away"],
+                     "spread": g.get("spread"), "total": g.get("total"),
+                     "home_score": g.get("home_score"), "away_score": g.get("away_score"),
+                     "updated_at": NOW.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    for i in range(0, len(rows), 500):
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/rest/v1/games", data=json.dumps(rows[i:i + 500]).encode(), method="POST",
+            headers={"apikey": key, "Content-Type": "application/json",
+                     "Prefer": "resolution=merge-duplicates,return=minimal"})
+        try:
+            urllib.request.urlopen(req, timeout=60).read()
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"database answered {e.code}: {e.read()[:200]!r}") from e
+    print(f"{league}: {len(rows)} games sent to the database")
 
 
 def saved_odds(league):
