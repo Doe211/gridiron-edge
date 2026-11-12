@@ -194,3 +194,7 @@ dialog p { margin: 4px 0; color: var(--text); }
 .name-chip.out { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); color: var(--bad); }
 .name-chip.out .nm { text-decoration: line-through; text-decoration-thickness: 2px; }
 .name-chip.won { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); font-weight: 600; }
+.standings .row.head { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
+.standings .c { width: 64px; text-align: center; font-weight: 700; }
+.player small { color: var(--muted); }
+@media (max-width: 640px) { .standings .c { width: 44px; font-size: 14px; } }

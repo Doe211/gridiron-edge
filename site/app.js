@@ -190,7 +190,7 @@ function renderWeek() {
   }
   const name = playerName();
   const num = load("player_number", null);
-  html += `<div class="player">${name ? `Picking as <b>${esc(name)}</b>${num ? ` · Player <b>#${num}</b>` : ""} · <button class="link" id="change-name">Change name</button>` : "Enter your name when you make your first pick."}</div>`;
+  html += `<div class="player">${name ? `Your ticket${num ? ` <b>#${num}</b>` : ""} · <b>${esc(name)}</b> · <button class="link" id="change-name">Change name</button><br><small>Your ticket belongs to this device and browser. Only this device can change its picks.</small>` : "Your first pick starts your ticket. It belongs to this device and browser."}</div>`;
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
   html += `<p class="note">Tap a team to pick it${pickMode() === "spread" ? " against the spread" : ""}, and tap Over or Under for the total. Tap again to change your mind. Each game locks when it starts${dl ? ", and all picks lock at the deadline" : ""}.</p>`;
   return html;
@@ -430,7 +430,7 @@ async function loadMyPicks() {
 let pendingPick = null;
 function askName(changing = false) {
   $("#name-input").value = playerName();
-  $("#name-title").textContent = changing ? "Change your name" : "What's your name?";
+  $("#name-title").textContent = changing ? "Change the name on your ticket" : "Start your ticket";
   $("#name-status").textContent = "";
   $("#name").showModal();
   setTimeout(() => $("#name-input").focus(), 50);
@@ -647,7 +647,7 @@ function pickResult(g, p) {
   const a = actualWinner(g);
   return a ? a === p.choice : null;
 }
-const playerTag = (p) => `${p.name}${state.playerNumbers?.[p.user_id] ? ` #${state.playerNumbers[p.user_id]}` : ""}`;
+const playerTag = (p) => `${state.playerNumbers?.[p.user_id] ? `#${state.playerNumbers[p.user_id]} ` : ""}${p.name}`;
 
 function renderAllPicks() {
   let html = `<h1>All Picks</h1><p class="sub">Only you can see this page.</p>`;
@@ -662,7 +662,18 @@ function renderAllPicks() {
   const players = new Set(inWeek.map((p) => p.user_id));
   html += `<div class="toolbar"><label for="picks-week">Week:</label><select id="picks-week">${weeks.map((x) => `<option value="${x}" ${x === w ? "selected" : ""}>${esc(weekLabel(x))}</option>`).join("")}</select>
     <button class="pick" id="picks-refresh">Refresh</button><button class="pick" id="picks-csv">Download spreadsheet</button></div>
-    <p class="note">${players.size} ${players.size === 1 ? "player" : "players"} made ${inWeek.length} ${inWeek.length === 1 ? "pick" : "picks"} this week.</p><div class="cards">`;
+    <p class="note">${players.size} ${players.size === 1 ? "ticket" : "tickets"} with ${inWeek.length} ${inWeek.length === 1 ? "pick" : "picks"} this week.</p>`;
+  // Standings: one row per ticket. The same person on two devices has two tickets, scored separately.
+  const tickets = new Map();
+  for (const p of inWeek) {
+    if (!tickets.has(p.user_id)) tickets.set(p.user_id, { name: p.name, num: state.playerNumbers?.[p.user_id], w: 0, l: 0, push: 0, open: 0 });
+    const t = tickets.get(p.user_id), r = pickResult(games.get(p.game_id), p);
+    if (r === true) t.w++; else if (r === false) t.l++; else if (r === null) t.push++; else t.open++;
+  }
+  const standings = [...tickets.values()].sort((a, b) => b.w - a.w || a.l - b.l || (a.num ?? 0) - (b.num ?? 0));
+  html += `<h2>Tickets</h2><div class="table standings"><div class="row head"><span class="rank">#</span><span class="t">Ticket</span><span class="c">Won</span><span class="c">Lost</span><span class="c">Push</span><span class="c">Pending</span></div>`
+    + standings.map((t, i) => `<div class="row"><span class="rank">${i + 1}</span><span class="t"><b>${t.num ? `#${t.num}` : "—"}</b> ${esc(t.name)}</span><span class="c pos">${t.w}</span><span class="c neg">${t.l}</span><span class="c">${t.push}</span><span class="c r">${t.open}</span></div>`).join("")
+    + `</div><h2>Picks by game</h2><div class="cards">`;
   const byGame = new Map();
   for (const p of inWeek) { if (!byGame.has(p.game_id)) byGame.set(p.game_id, []); byGame.get(p.game_id).push(p); }
   const ordered = [...byGame.keys()].sort((a, b) => (games.get(a)?.kickoff || "").localeCompare(games.get(b)?.kickoff || ""));
@@ -687,13 +698,13 @@ function renderAllPicks() {
       <div class="lines"><span><span class="label">Spread</span> ${g ? esc(g.spread != null ? lineText(g) : "No line") : ""}</span><span><span class="label">Over/under</span> ${g && g.total != null ? pts(g.total) : "—"}</span></div>
       <div class="pick-grid">${box("side", "away")}${box("side", "home")}${list.some((p) => p.kind === "total") || (g && g.total != null) ? box("total", "over") + box("total", "under") : ""}</div></article>`;
   }
-  return html + `</div><p class="note">Each player has a permanent number, so two players with the same name show different numbers. A crossed-out name with ✗ is a losing pick; ✓ is a winner. A line in parentheses means the player picked before the line changed, and the pick is judged at that line.</p>`;
+  return html + `</div><p class="note">Each ticket has its own number, so two people with the same name, or one person with tickets on two devices, are never mixed up. A crossed-out name with ✗ is a losing pick; ✓ is a winner. A line in parentheses means the player picked before the line changed, and the pick is judged at that line.</p>`;
 }
 
 function downloadPicks() {
   const games = new Map(D().games.map((g) => [g.id, g]));
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [["Player", "Player #", "Week", "Game", "Kickoff", "Pick type", "Pick", "Line", "Result", "Picked at"].map(q).join(",")];
+  const lines = [["Name", "Ticket #", "Week", "Game", "Kickoff", "Pick type", "Pick", "Line", "Result", "Picked at"].map(q).join(",")];
   for (const p of state.allPicks || []) {
     const g = games.get(p.game_id);
     const won = pickResult(g, p);
