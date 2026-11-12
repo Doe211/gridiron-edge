@@ -1,4 +1,4 @@
--- Tickets: a 3- to 8-pick parlay with a wager in coins. Once placed, a ticket can never be changed.
+-- Tickets: a 3- to 8-pick parlay with a wager in coins (3 for 3 pays 5 to 1 ... 8 for 8 pays 150 to 1). Once placed, a ticket can never be changed.
 -- Run once in Supabase's SQL Editor (after setup.sql and players.sql).
 
 -- The schedule and Vegas lines, kept up to date by the website's scheduled job (with the secret key).

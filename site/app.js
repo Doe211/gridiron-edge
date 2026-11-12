@@ -32,7 +32,7 @@ const picks = (kind) => (state.myLegs[state.league] || {})[kind] || {};
 const draft = (kind) => load(`draft_${kind}_${state.league}`, {});
 
 // Tickets: 3 to 8 picks, all must win. Pays this many coins per coin wagered (plus the wager back).
-const PAYOUT = { 3: 5.5, 4: 10, 5: 15, 6: 30, 7: 80, 8: 150 };
+const PAYOUT = { 3: 5, 4: 10, 5: 15, 6: 30, 7: 80, 8: 150 };
 const COIN = "🪙";
 const MIN_LEGS = 3, MAX_LEGS = 8, MAX_WAGER = 100;
 const coins = (n) => `${Number.isInteger(n) ? n : n.toFixed(1)} ${COIN}`;
