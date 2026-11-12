@@ -12,6 +12,7 @@ const state = {
   week: null,
   data: {},
   overrides: {},
+  settings: {}, // administrator settings, e.g. { picks_close: "2026-11-15T18:00:00Z" }
 };
 
 // ---------- storage (works even when the browser blocks it) ----------
@@ -50,7 +51,12 @@ function erf(x) { // Abramowitz-Stegun approximation
 const D = () => state.data[state.league];
 const isFinal = (g) => g.home_score != null && g.away_score != null;
 const margin = (g) => (isFinal(g) ? g.home_score - g.away_score : null);
-const isLocked = (g) => isFinal(g) || (g.kickoff && new Date(g.kickoff) <= new Date());
+/** The administrator's deadline for all picks, if one is set. */
+const picksDeadline = () => (state.settings.picks_close ? new Date(state.settings.picks_close) : null);
+const picksClosed = () => { const d = picksDeadline(); return !!d && d <= new Date(); };
+const isLocked = (g) => isFinal(g) || (g.kickoff && new Date(g.kickoff) <= new Date()) || picksClosed();
+/** Whether this league has over/unders to show (NFL and college come with them; NBA from The Odds API). */
+const hasTotals = () => D().has_totals || D().games.some((g) => g.total != null);
 const team = (g, side) => (side === "home" ? g.home : g.away);
 const shortName = (code) => (state.league === "mlb" ? D().names[code] || code : code);
 const fullName = (code) => D().names[code] || code;
@@ -159,45 +165,21 @@ function when(g) {
 
 function gameCard(g) {
   const locked = isLocked(g), mine = picks("picks")[g.id], myTotal = picks("totals")[g.id];
-  let stats = "";
-  if (state.league === "mlb") {
-    const mw = modelWinner(g);
-    stats += stat("Model", `${shortName(team(g, mw))} ${Math.round(winChance(g, mw) * 100)}%`);
-    const fav = vegasFavorite(g);
-    if (fav) {
-      const vc = fav === "home" ? g.home_win_chance : 1 - g.home_win_chance;
-      stats += stat("Vegas favorite", `${shortName(team(g, fav))} ${Math.round(vc * 100)}%`);
-      const lean = mlbLean(g);
-      stats += stat("Model likes", `${shortName(team(g, lean.side))} +${Math.round(lean.gap * 100)} pts`, lean.gap >= MLB_HIGHLIGHT);
-    } else stats += stat("Vegas", "No line yet");
-  } else {
-    if (pickMode() === "spread") stats += stat(g.adjusted && g.spread !== g.vegas_spread ? "Line (adjusted)" : "Vegas line", lineText(g));
-    stats += stat("Model", modelText(g));
-    const p = modelSpreadPick(g), e = edge(g);
-    if (p) stats += stat("Model likes", `${shortName(team(g, p))} ${lineFor(g, p)} (${e.toFixed(1)} pts)`, e >= SPREAD_HIGHLIGHT);
-  }
-  let totals = "";
-  if (D().has_totals && g.total_prediction != null) {
-    totals = `<div class="stats">${stat("Over/under", g.total != null ? pts(g.total) : "No line yet")}${stat("Model total", g.total_prediction.toFixed(1))}`;
-    const tp = modelTotalPick(g), te = totalEdge(g);
-    if (tp) totals += stat("Model likes", `${ouLabel(tp)} (${te.toFixed(1)} pts)`, te >= TOTAL_HIGHLIGHT);
-    totals += "</div>";
-    if (g.total != null) {
-      totals += `<div class="picks"><span class="lbl">Your total:</span>${["over", "under"].map((s) =>
-        `<button class="pick" data-total="${s}" data-id="${esc(g.id)}" aria-pressed="${myTotal === s}" ${locked ? "disabled" : ""}>${ouLabel(s)} ${pts(g.total)}</button>`).join("")}</div>`;
-    }
-  }
-  const canPick = g.spread != null || pickMode() === "winner";
-  const pickBtns = canPick ? `<div class="picks"><span class="lbl">Your pick:</span>${["away", "home"].map((s) =>
-    `<button class="pick" data-pick="${s}" data-id="${esc(g.id)}" aria-pressed="${mine === s}" ${locked ? "disabled" : ""}>${esc(shortName(team(g, s)))}${pickMode() === "spread" ? " " + lineFor(g, s) : ""}</button>`).join("")}${locked ? '<span class="locked">🔒 Locked</span>' : ""}</div>` : "";
-  return `<article class="card">
-    <div class="card-head"><span class="matchup">${esc(fullName(g.away))} ${g.neutral ? "vs." : "at"} ${esc(fullName(g.home))}</span><span class="when">${esc(when(g))}</span></div>
-    <div class="stats">${stats}</div>
-    ${totals}
-    ${g.adjusted ? '<span class="adjusted">✎ Adjusted line</span>' : ""}
-    ${adminToken() && !locked && state.league !== "mlb" ? `<div class="picks"><button class="admin-btn" data-adjust="${esc(g.id)}">✎ Adjust line</button></div>` : ""}
-    ${g.notes?.length ? `<ul class="notes">${g.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
-    ${pickBtns}
+  const teamBtn = (side) => `<button class="team-pick" data-pick="${side}" data-id="${esc(g.id)}" aria-pressed="${mine === side}" ${locked ? "disabled" : ""}>
+      <span class="tp-name">${esc(fullName(team(g, side)))}</span>
+      <span class="tp-line">${g.spread != null ? esc(lineFor(g, side)) : ""}</span>
+    </button>`;
+  const ouBtn = (side) => `<button class="pick" data-total="${side}" data-id="${esc(g.id)}" aria-pressed="${myTotal === side}" ${locked ? "disabled" : ""}>${ouLabel(side)} ${pts(g.total)}</button>`;
+  return `<article class="card sheet">
+    <div class="card-head"><span class="when">${esc(when(g))}${g.neutral ? " · Neutral site" : ""}</span>${locked ? '<span class="locked">🔒 Locked</span>' : ""}</div>
+    <div class="teams">${teamBtn("away")}<span class="at">${g.neutral ? "vs." : "at"}</span>${teamBtn("home")}</div>
+    <div class="lines">
+      <span><span class="label">Spread</span> ${esc(g.spread != null ? lineText(g) : "No line yet")}</span>
+      <span><span class="label">Over/under</span> ${g.total != null ? pts(g.total) : "No line yet"}</span>
+      ${g.adjusted ? '<span class="adjusted">✎ Adjusted</span>' : ""}
+    </div>
+    ${g.total != null ? `<div class="picks"><span class="lbl">Total:</span>${ouBtn("over")}${ouBtn("under")}</div>` : ""}
+    ${adminToken() && !isFinal(g) ? `<div class="picks"><button class="admin-btn" data-adjust="${esc(g.id)}">✎ Adjust line</button></div>` : ""}
   </article>`;
 }
 
@@ -205,8 +187,13 @@ function renderWeek() {
   const games = upcomingGames(), w = upcomingWeek();
   let html = `<h1>${w != null ? esc(weekLabel(w)) : "This Week"}</h1>`;
   if (!games.length) return html + `<div class="empty">No upcoming games right now.</div>`;
+  const dl = picksDeadline();
+  if (dl) {
+    const t = dl.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    html += picksClosed() ? `<div class="deadline closed">🔒 Picks are closed.</div>` : `<div class="deadline">⏰ Picks close ${esc(t)}</div>`;
+  }
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
-  html += `<p class="note">${pickMode() === "spread" ? "Tap a team to pick it against the spread." : "Tap a team to pick the winner."} Picks lock when the game starts. Green marks a big disagreement with Vegas, not a sure thing.</p>`;
+  html += `<p class="note">Tap a team to pick it${pickMode() === "spread" ? " against the spread" : ""}, and tap Over or Under for the total. Tap again to change your mind. Each game locks when it starts${dl ? ", and all picks lock at the deadline" : ""}. Your picks are saved in this browser.</p>`;
   return html;
 }
 
@@ -219,7 +206,7 @@ function renderResults() {
   let html = `<h1>${esc(weekLabel(w))} Results</h1>
     <div class="toolbar"><label for="week">Week:</label><select id="week">${weeks.map((x) => `<option value="${x}" ${x === w ? "selected" : ""}>${esc(weekLabel(x))}</option>`).join("")}</select></div>
     <div class="summary">${stat("Model, winners", rec(modelSU(games)))}${pickMode() === "spread" ? stat("Model vs spread", rec(modelATS(games))) : ""}${stat(pickMode() === "spread" ? "You vs spread" : "You, winners", rec(yourRecord(games)))}`;
-  if (D().has_totals) {
+  if (hasTotals()) {
     const mo = modelOU(games), yo = yourOU(games);
     if (mo.w + mo.l) html += stat("Model O/U", rec(mo));
     if (yo.w + yo.l) html += stat("You O/U", rec(yo));
@@ -236,13 +223,13 @@ function renderResults() {
     if (y && pickMode() === "winner") v.push(verdict(`You: ${shortName(team(g, y))}`, actualWinner(g) ? y === actualWinner(g) : null));
     else if (y && g.spread != null) v.push(verdict(`You: ${shortName(team(g, y))} ${lineFor(g, y)}`, spreadWon(g, y)));
     let t = "";
-    if (D().has_totals && g.total != null) {
+    if (hasTotals() && g.total != null) {
       const tv = [], mp = modelTotalPick(g), yp = myT[g.id];
       if (mp) tv.push(verdict(`Model: ${ouLabel(mp)}`, totalWon(g, mp)));
       if (yp) tv.push(verdict(`You: ${ouLabel(yp)}`, totalWon(g, yp)));
       t = tv.length ? `<div class="verdicts">${tv.join("")}</div>` : "";
     }
-    const info = [g.spread != null ? `Line: ${lineText(g)}` : "", D().has_totals && g.total != null ? `Total ${actualTotal(g)} (O/U ${pts(g.total)})` : ""].filter(Boolean).join(" · ");
+    const info = [g.spread != null ? `Line: ${lineText(g)}` : "", hasTotals() && g.total != null ? `Total ${actualTotal(g)} (O/U ${pts(g.total)})` : ""].filter(Boolean).join(" · ");
     html += `<article class="card result"><div class="card-head"><span class="score">${esc(shortName(g.away))} ${g.away_score} at ${esc(shortName(g.home))} ${g.home_score}</span><span class="line-info">${esc(info)}</span></div><div class="verdicts">${v.join("")}</div>${t}</article>`;
   }
   return html + "</div>";
@@ -286,12 +273,14 @@ function renderScorecard() {
     }
   }
   html += "</div>";
-  if (D().has_totals) {
-    const mo = modelOU(season), yo = yourOU(season), miss = totalMiss(season);
-    html += `<h2>Over/under</h2><div class="table">${row("Model on over/unders", mo)}${row("Highlighted picks only (5+ pts off the total)", modelStrongOU(season), "indent")}${row("You on over/unders", yo)}`;
-    if (yo.w + yo.l) html += row("Model on the totals you picked", modelOnYourTotals(season));
-    if (miss != null) html += `<div class="row"><span class="t">Model's average miss on total points</span><span class="p">${miss.toFixed(1)} pts</span></div>`;
-    html += `</div><p class="note">Like the spread, you need about 52.4% to break even. A typical NBA total misses by about 15 points either way.</p>`;
+  if (hasTotals()) {
+    const model = D().has_totals, mo = modelOU(season), yo = yourOU(season), miss = totalMiss(season);
+    html += `<h2>Over/under</h2><div class="table">`;
+    if (model) html += row("Model on over/unders", mo) + row("Highlighted picks only (5+ pts off the total)", modelStrongOU(season), "indent");
+    html += row("You on over/unders", yo);
+    if (model && yo.w + yo.l) html += row("Model on the totals you picked", modelOnYourTotals(season));
+    if (model && miss != null) html += `<div class="row"><span class="t">Model's average miss on total points</span><span class="p">${miss.toFixed(1)} pts</span></div>`;
+    html += `</div><p class="note">Like the spread, you need about 52.4% to break even.</p>`;
   }
   html += `<h2>You vs. the model</h2><div class="h2h">`;
   if (!(you.w + you.l)) html += `Make picks on the This Week tab. Once those games finish, you'll see how you stack up against the model here.`;
@@ -367,6 +356,13 @@ document.addEventListener("click", (e) => {
   else if (b.id === "adj-save") submitAdjust(false);
   else if (b.id === "adj-vegas") submitAdjust(true);
   else if (b.id === "admin-save") connectAdmin();
+  else if (b.id === "deadline-save") {
+    const v = $("#deadline").value;
+    if (!v) $("#deadline-status").textContent = "Choose a date and time first.";
+    else saveDeadline(new Date(v));
+  }
+  else if (b.id === "deadline-now-btn") saveDeadline(new Date());
+  else if (b.id === "deadline-clear") saveDeadline(null);
   else if (b.id === "admin-off") { save("admin_token", null); $("#admin").close(); render(); }
 });
 document.addEventListener("change", (e) => {
@@ -380,22 +376,27 @@ window.addEventListener("hashchange", () => { if (location.hash === "#admin") op
   if (!["week", "results", "scorecard", "ratings"].includes(state.tab)) state.tab = "week";
   render();
   try { state.overrides = await fetchJSON("lines.json"); } catch { state.overrides = {}; }
+  try { state.settings = await fetchJSON("settings.json"); } catch { state.settings = {}; }
   // The administrator sees the newest lines right away, before the site finishes republishing.
   if (adminToken()) {
     try {
       const r = await gh(`contents/${LINES_PATH}?ref=main&t=${Date.now()}`, { cache: "no-store" });
       if (r.ok) { const f = await r.json(); state.overrides = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, "")))) || "{}"); }
-    } catch { /* fall back to the published file */ }
+      const r2 = await gh(`contents/${SETTINGS_PATH}?ref=main&t=${Date.now()}`, { cache: "no-store" });
+      if (r2.ok) { const f = await r2.json(); state.settings = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, "")))) || "{}"); }
+    } catch { /* fall back to the published files */ }
   }
   await loadLeague(state.league);
   render();
   if (location.hash === "#admin") openAdmin();
+  // Keep locks and the deadline current while the page stays open.
+  setInterval(() => { if (!document.querySelector("dialog[open]")) render(); }, 30000);
 })();
 
 // ---------- administrator: adjust lines from the website ----------
 // Saving writes site/lines.json in the GitHub project using a key that's kept only in the
 // administrator's own browser. GitHub then republishes the site for everyone (about 2 minutes).
-const REPO = "Doe211/gridiron-edge", LINES_PATH = "site/lines.json";
+const REPO = "Doe211/gridiron-edge", LINES_PATH = "site/lines.json", SETTINGS_PATH = "site/settings.json";
 const adminToken = () => load("admin_token", null);
 
 function gh(path, opts = {}) {
@@ -410,7 +411,7 @@ function openAdmin() {
   $("#admin-token").value = "";
   $("#admin-connected").hidden = !adminToken();
   $("#admin-setup").hidden = !!adminToken();
-  if (adminToken()) renderAdminList();
+  if (adminToken()) { renderAdminList(); renderDeadlineForm(); }
   $("#admin").showModal();
 }
 
@@ -427,6 +428,7 @@ async function connectAdmin() {
     $("#admin-setup").hidden = true;
     $("#admin-connected").hidden = false;
     renderAdminList();
+    renderDeadlineForm();
     render();
   } catch {
     $("#admin-status").textContent = "That key didn't work. Check that it's for the gridiron-edge project with Contents set to “Read and write”.";
@@ -455,7 +457,7 @@ function openAdjust(id) {
   $("#adj-points").value = g.spread ? pts(Math.abs(g.spread)) : "";
   $("#adj-points-row").hidden = $("#adj-fav").value === "pick";
   $("#adj-vegas-spread").textContent = `Vegas: ${vs == null ? "no line" : lineText({ ...g, spread: vs })}`;
-  $("#adj-total-row").hidden = !D().has_totals;
+  $("#adj-total-row").hidden = false;
   $("#adj-total").value = g.total != null ? pts(g.total) : "";
   $("#adj-vegas-total").textContent = `Vegas: ${vt == null ? "no line" : pts(vt)}`;
   $("#adj-status").textContent = "";
@@ -473,7 +475,7 @@ async function submitAdjust(useVegas) {
     entry = {};
     if (spread !== vs) entry.spread = spread;
     const t = parseFloat($("#adj-total").value);
-    if (D().has_totals && t > 0 && t !== vt) entry.total = t;
+    if (t > 0 && t !== vt) entry.total = t;
     if (!Object.keys(entry).length) entry = null;
   }
   $("#adj-status").textContent = "Saving…";
@@ -481,35 +483,65 @@ async function submitAdjust(useVegas) {
   if (ok) $("#adjust").close();
 }
 
-async function saveLine(id, entry) {
-  const setStatus = (t) => { const el = $("#adjust").open ? $("#adj-status") : $("#admin-status"); el.textContent = t; };
+/** Reads a JSON file from the GitHub project, changes it, and saves it back. Returns the new contents or null. */
+async function saveFile(path, change, message, setStatus) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const cur = await gh(`contents/${LINES_PATH}?ref=main&t=${Date.now()}`, { cache: "no-store" });
-      if (cur.status === 401 || cur.status === 403) { setStatus("Your admin key has expired or was removed. Open the admin panel (add #admin to the address) and connect again."); return false; }
-      const file = await cur.json();
-      const lines = JSON.parse(decodeURIComponent(escape(atob(file.content.replace(/\n/g, "")))) || "{}");
-      if (entry) lines[id] = entry; else delete lines[id];
-      const body = JSON.stringify(lines, null, 2) + "\n";
-      const put = await gh(`contents/${LINES_PATH}`, {
+      const cur = await gh(`contents/${path}?ref=main&t=${Date.now()}`, { cache: "no-store" });
+      if (cur.status === 401 || cur.status === 403) { setStatus("Your admin key has expired or was removed. Open the admin panel (add #admin to the address) and connect again."); return null; }
+      const file = cur.status === 404 ? null : await cur.json();
+      const data = file ? JSON.parse(decodeURIComponent(escape(atob(file.content.replace(/\n/g, "")))) || "{}") : {};
+      change(data);
+      const body = JSON.stringify(data, null, 2) + "\n";
+      const put = await gh(`contents/${path}`, {
         method: "PUT",
-        body: JSON.stringify({ message: entry ? `Adjust line for ${id}` : `Use Vegas line for ${id}`, content: btoa(unescape(encodeURIComponent(body))), sha: file.sha, branch: "main" }),
+        body: JSON.stringify({ message, content: btoa(unescape(encodeURIComponent(body))), branch: "main", ...(file ? { sha: file.sha } : {}) }),
       });
       if (put.status === 409) continue; // someone else saved at the same moment: try again
       if (!put.ok) throw new Error(put.status);
-      state.overrides = lines;
-      for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
-      render();
       setStatus("");
-      toast("Saved. Everyone will see the new line in about 2 minutes.");
-      return true;
+      return data;
     } catch {
       setStatus("Couldn't save. Check your internet connection and try again.");
-      return false;
+      return null;
     }
   }
   setStatus("Couldn't save. Try again.");
-  return false;
+  return null;
+}
+
+async function saveLine(id, entry) {
+  const setStatus = (t) => { const el = $("#adjust").open ? $("#adj-status") : $("#admin-status"); el.textContent = t; };
+  const lines = await saveFile(LINES_PATH, (d) => { if (entry) d[id] = entry; else delete d[id]; },
+    entry ? `Adjust line for ${id}` : `Use Vegas line for ${id}`, setStatus);
+  if (!lines) return false;
+  state.overrides = lines;
+  for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
+  render();
+  toast("Saved. Everyone will see the new line in about 2 minutes.");
+  return true;
+}
+
+/** Sets (or with null, removes) the time when all picks close. */
+async function saveDeadline(date) {
+  const setStatus = (t) => { $("#deadline-status").textContent = t; };
+  setStatus("Saving…");
+  const settings = await saveFile(SETTINGS_PATH, (d) => { if (date) d.picks_close = date.toISOString(); else delete d.picks_close; },
+    date ? "Set the pick deadline" : "Remove the pick deadline", setStatus);
+  if (!settings) return;
+  state.settings = settings;
+  renderDeadlineForm();
+  render();
+  toast(date ? "Deadline saved. Everyone will see it in about 2 minutes." : "Deadline removed. Everyone will see it in about 2 minutes.");
+}
+
+function renderDeadlineForm() {
+  const d = picksDeadline();
+  const pad = (n) => String(n).padStart(2, "0");
+  $("#deadline").value = d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}` : "";
+  $("#deadline-now").textContent = d
+    ? `${picksClosed() ? "Picks closed" : "Picks close"} ${d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.`
+    : "No deadline. Each game locks when it starts.";
 }
 
 function toast(text) {

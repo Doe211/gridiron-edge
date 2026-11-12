@@ -49,7 +49,7 @@
   <h3>Highlighted picks</h3>
   <p>A pick is highlighted in green when the model disagrees with Vegas by a lot: 3+ points on the spread, 5+ points on an NBA total, or 5+ points of win chance in MLB. That marks a big disagreement, not a better bet.</p>
   <h3>Your picks</h3>
-  <p>Your picks are saved in this browser only. Picks lock when the game starts.</p>
+  <p>Your picks are saved in this browser only. Each game locks when it starts, and all picks lock at the deadline shown on This Week, if there is one.</p>
   <h3>Data</h3>
   <p>NFL data from nflverse. College data from CollegeFootballData.com. NBA games from balldontlie.io. MLB games from MLB's public stats service. NBA and MLB betting lines from The Odds API. Lines marked “Adjusted line” were set by Gridiron Edge. Lines change during the week, so the line shown may differ from what a sportsbook offers right now.</p>
   <h3>For entertainment</h3>
@@ -92,6 +92,17 @@
   </div>
   <div id="admin-connected" hidden>
     <p>Admin mode is on. Each upcoming game has an <b>Adjust line</b> button.</p>
+    <h3>Pick deadline</h3>
+    <p class="note" id="deadline-now"></p>
+    <label class="field">Close all picks at
+      <input id="deadline" type="datetime-local">
+    </label>
+    <div class="dialog-actions">
+      <button class="pick" id="deadline-clear">Remove deadline</button>
+      <button class="pick" id="deadline-now-btn">Close picks now</button>
+      <button class="pick primary" id="deadline-save">Save deadline</button>
+    </div>
+    <p class="status" id="deadline-status" role="status"></p>
     <h3>Adjusted lines</h3>
     <div class="table" id="admin-list"></div>
     <div class="dialog-actions"><button class="pick" id="admin-off">Turn off admin mode on this device</button></div>
