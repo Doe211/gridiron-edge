@@ -80,9 +80,14 @@ SUPABASE_URL = "https://ryddmapuqqbuyzwvxnbe.supabase.co"
 def sync_games(league, games):
     """Sends recent and upcoming games, with their Vegas lines, to the database, which uses them
     to check every ticket (game not started, real current line)."""
-    key = os.environ.get("SUPABASE_SECRET_KEY", "")
+    key = os.environ.get("SUPABASE_SECRET_KEY", "").strip()
     if not key:
         return
+    if not key.startswith("sb_secret_") or "\u2022" in key or len(key) < 30:
+        # Says what's wrong without ever printing the key itself.
+        raise RuntimeError("SUPABASE_SECRET_KEY doesn't look like a full secret key "
+                           f"(starts with sb_secret_: {key.startswith('sb_secret_')}, has hidden dots: {chr(0x2022) in key}, "
+                           f"length {len(key)}). Copy it again with Supabase's copy button.")
     lo, hi = NOW.timestamp() - 14 * 86400, NOW.timestamp() + 45 * 86400
     rows = []
     for g in games:
