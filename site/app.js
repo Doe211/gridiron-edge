@@ -1,5 +1,6 @@
-// Gridiron Edge website. Reads the data files the scheduled job writes (data/<league>.json)
-// and the administrator's hand-set lines (lines.json). Your picks stay in this browser.
+// Gridiron Edge website. Reads the data files the scheduled job writes (data/<league>.json).
+// Players' picks, the pick deadline and the administrator's adjusted lines live in the
+// Supabase database (see supabase/setup.sql); config.js says where it is.
 "use strict";
 
 const LEAGUES = { nfl: "NFL", college: "College", nba: "NBA", mlb: "MLB" };
@@ -23,13 +24,8 @@ function load(key, fallback) {
 function save(key, value) {
   try { localStorage.setItem("ge_" + key, JSON.stringify(value)); } catch { /* private mode */ }
 }
+// This player's picks, kept in the browser as a quick copy of what's saved in the database.
 const picks = (kind) => load(`${kind}_${state.league}`, {});
-function setPick(kind, id, value) {
-  const all = picks(kind);
-  if (all[id] === value) delete all[id]; else all[id] = value;
-  save(`${kind}_${state.league}`, all);
-  render();
-}
 
 // ---------- helpers ----------
 const $ = (s) => document.querySelector(s);
@@ -179,7 +175,7 @@ function gameCard(g) {
       ${g.adjusted ? '<span class="adjusted">✎ Adjusted</span>' : ""}
     </div>
     ${g.total != null ? `<div class="picks"><span class="lbl">Total:</span>${ouBtn("over")}${ouBtn("under")}</div>` : ""}
-    ${adminToken() && !isFinal(g) ? `<div class="picks"><button class="admin-btn" data-adjust="${esc(g.id)}">✎ Adjust line</button></div>` : ""}
+    ${isAdmin() && !isFinal(g) ? `<div class="picks"><button class="admin-btn" data-adjust="${esc(g.id)}">✎ Adjust line</button></div>` : ""}
   </article>`;
 }
 
@@ -192,8 +188,10 @@ function renderWeek() {
     const t = dl.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     html += picksClosed() ? `<div class="deadline closed">🔒 Picks are closed.</div>` : `<div class="deadline">⏰ Picks close ${esc(t)}</div>`;
   }
+  const name = playerName();
+  html += `<div class="player">${name ? `Picking as <b>${esc(name)}</b> · <button class="link" id="change-name">Change name</button>` : "Enter your name when you make your first pick."}</div>`;
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
-  html += `<p class="note">Tap a team to pick it${pickMode() === "spread" ? " against the spread" : ""}, and tap Over or Under for the total. Tap again to change your mind. Each game locks when it starts${dl ? ", and all picks lock at the deadline" : ""}. Your picks are saved in this browser.</p>`;
+  html += `<p class="note">Tap a team to pick it${pickMode() === "spread" ? " against the spread" : ""}, and tap Over or Under for the total. Tap again to change your mind. Each game locks when it starts${dl ? ", and all picks lock at the deadline" : ""}.</p>`;
   return html;
 }
 
@@ -315,11 +313,13 @@ function renderRatings() {
 function render() {
   document.querySelectorAll("[data-league]").forEach((b) => b.setAttribute("aria-selected", b.dataset.league === state.league));
   document.querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === state.tab));
+  $("#tab-picks").hidden = !isAdmin();
   const main = $("#main"), d = D();
   if (!d) { main.innerHTML = `<div class="empty">Loading ${LEAGUES[state.league]} games…</div>`; return; }
   if (d.error) { main.innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
   let html = d.message ? `<div class="warn">${esc(d.message)}</div>` : "";
-  html += { week: renderWeek, results: renderResults, scorecard: renderScorecard, ratings: renderRatings }[state.tab]();
+  if (state.tab === "picks" && !isAdmin()) state.tab = "week";
+  html += { week: renderWeek, results: renderResults, scorecard: renderScorecard, ratings: renderRatings, picks: renderAllPicks }[state.tab]();
   main.innerHTML = html;
   const updated = new Date(d.updated);
   $("#updated").textContent = `${LEAGUES[state.league]} data updated ${updated.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}.`;
@@ -346,16 +346,17 @@ async function loadLeague(league) {
 document.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  if (b.dataset.league) { state.league = b.dataset.league; state.week = null; save("league", state.league); render(); loadLeague(state.league).then(render); }
-  else if (b.dataset.tab) { state.tab = b.dataset.tab; save("tab", state.tab); render(); window.scrollTo({ top: 0 }); }
-  else if (b.dataset.pick) setPick("picks", b.dataset.id, b.dataset.pick);
-  else if (b.dataset.total) setPick("totals", b.dataset.id, b.dataset.total);
+  if (b.dataset.league) { state.league = b.dataset.league; state.week = null; state.allPicks = null; save("league", state.league); render(); loadLeague(state.league).then(() => { render(); loadMyPicks(); if (state.tab === "picks") loadAllPicks(); }); }
+  else if (b.dataset.tab) { state.tab = b.dataset.tab; save("tab", state.tab); render(); window.scrollTo({ top: 0 }); if (state.tab === "picks") loadAllPicks(); }
+  else if (b.dataset.pick) setPick("side", b.dataset.id, b.dataset.pick);
+  else if (b.dataset.total) setPick("total", b.dataset.id, b.dataset.total);
   else if (b.id === "about-btn") $("#about").showModal();
+  else if (b.id === "change-name") askName(true);
   else if (b.dataset.adjust) openAdjust(b.dataset.adjust);
   else if (b.dataset.removeAdj) saveLine(b.dataset.removeAdj, null).then(renderAdminList);
   else if (b.id === "adj-save") submitAdjust(false);
   else if (b.id === "adj-vegas") submitAdjust(true);
-  else if (b.id === "admin-save") connectAdmin();
+  else if (b.id === "admin-signout") adminSignOut();
   else if (b.id === "deadline-save") {
     const v = $("#deadline").value;
     if (!v) $("#deadline-status").textContent = "Choose a date and time first.";
@@ -363,76 +364,152 @@ document.addEventListener("click", (e) => {
   }
   else if (b.id === "deadline-now-btn") saveDeadline(new Date());
   else if (b.id === "deadline-clear") saveDeadline(null);
-  else if (b.id === "admin-off") { save("admin_token", null); $("#admin").close(); render(); }
+  else if (b.id === "picks-refresh") loadAllPicks();
+  else if (b.id === "picks-csv") downloadPicks();
 });
 document.addEventListener("change", (e) => {
   if (e.target.id === "week") { state.week = Number(e.target.value); render(); }
+  if (e.target.id === "picks-week") { state.picksWeek = Number(e.target.value); render(); }
   if (e.target.id === "adj-fav") $("#adj-points-row").hidden = e.target.value === "pick";
+});
+document.addEventListener("submit", (e) => {
+  if (e.target.id === "name-form") { e.preventDefault(); nameSaved(); }
+  if (e.target.id === "signin-form") { e.preventDefault(); adminSignIn(); }
 });
 window.addEventListener("hashchange", () => { if (location.hash === "#admin") openAdmin(); });
 
-(async function start() {
-  if (!LEAGUES[state.league]) state.league = "nfl";
-  if (!["week", "results", "scorecard", "ratings"].includes(state.tab)) state.tab = "week";
-  render();
-  try { state.overrides = await fetchJSON("lines.json"); } catch { state.overrides = {}; }
-  try { state.settings = await fetchJSON("settings.json"); } catch { state.settings = {}; }
-  // The administrator sees the newest lines right away, before the site finishes republishing.
-  if (adminToken()) {
-    try {
-      const r = await gh(`contents/${LINES_PATH}?ref=main&t=${Date.now()}`, { cache: "no-store" });
-      if (r.ok) { const f = await r.json(); state.overrides = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, "")))) || "{}"); }
-      const r2 = await gh(`contents/${SETTINGS_PATH}?ref=main&t=${Date.now()}`, { cache: "no-store" });
-      if (r2.ok) { const f = await r2.json(); state.settings = JSON.parse(decodeURIComponent(escape(atob(f.content.replace(/\n/g, "")))) || "{}"); }
-    } catch { /* fall back to the published files */ }
+// ---------- database (Supabase) ----------
+const CFG = window.GE_CONFIG || {};
+const db = CFG.supabaseUrl && window.supabase ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey) : null;
+let session = null, adminFlag = false;
+const isAdmin = () => adminFlag;
+const playerName = () => load("player_name", "");
+
+async function refreshSession() {
+  if (!db) return;
+  const { data } = await db.auth.getSession();
+  session = data.session;
+  adminFlag = false;
+  if (session && session.user.email) {
+    const { data: rows } = await db.from("admins").select("email").limit(1);
+    adminFlag = !!(rows && rows.length);
   }
-  await loadLeague(state.league);
-  render();
-  if (location.hash === "#admin") openAdmin();
-  // Keep locks and the deadline current while the page stays open.
-  setInterval(() => { if (!document.querySelector("dialog[open]")) render(); }, 30000);
-})();
-
-// ---------- administrator: adjust lines from the website ----------
-// Saving writes site/lines.json in the GitHub project using a key that's kept only in the
-// administrator's own browser. GitHub then republishes the site for everyone (about 2 minutes).
-const REPO = "Doe211/gridiron-edge", LINES_PATH = "site/lines.json", SETTINGS_PATH = "site/settings.json";
-const adminToken = () => load("admin_token", null);
-
-function gh(path, opts = {}) {
-  return fetch(`https://api.github.com/repos/${REPO}/${path}`, {
-    ...opts,
-    headers: { Authorization: `Bearer ${adminToken()}`, Accept: "application/vnd.github+json", ...(opts.headers || {}) },
-  });
 }
 
+async function loadShared() {
+  if (!db) {
+    try { state.overrides = await fetchJSON("lines.json"); } catch { state.overrides = {}; }
+    try { state.settings = await fetchJSON("settings.json"); } catch { state.settings = {}; }
+    return;
+  }
+  const [lines, settings] = await Promise.all([db.from("lines").select("game_id,spread,total"), db.from("settings").select("key,value")]);
+  const o = {};
+  for (const l of lines.data || []) o[l.game_id] = { spread: l.spread == null ? null : Number(l.spread), total: l.total == null ? null : Number(l.total) };
+  state.overrides = o;
+  const st = {};
+  for (const x of settings.data || []) st[x.key] = x.value;
+  state.settings = st;
+  for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
+}
+
+/** Loads this player's saved picks for the current league from the database. */
+async function loadMyPicks() {
+  if (!db || !session) return;
+  const league = state.league;
+  const { data, error } = await db.from("picks").select("game_id,kind,choice").eq("league", league).eq("user_id", session.user.id);
+  if (error) return;
+  const side = {}, total = {};
+  for (const p of data) (p.kind === "side" ? side : total)[p.game_id] = p.choice;
+  save(`picks_${league}`, side);
+  save(`totals_${league}`, total);
+  if (league === state.league) render();
+}
+
+// Asking for the player's name the first time they pick.
+let pendingPick = null;
+function askName(changing = false) {
+  $("#name-input").value = playerName();
+  $("#name-title").textContent = changing ? "Change your name" : "What's your name?";
+  $("#name-status").textContent = "";
+  $("#name").showModal();
+  setTimeout(() => $("#name-input").focus(), 50);
+}
+async function nameSaved() {
+  const name = $("#name-input").value.trim().slice(0, 40);
+  if (!name) { $("#name-status").textContent = "Type a name first."; return; }
+  const had = playerName();
+  save("player_name", name);
+  $("#name").close();
+  if (had && had !== name && db && session) await db.rpc("rename_me", { new_name: name });
+  render();
+  if (pendingPick) { const p = pendingPick; pendingPick = null; setPick(p.kind, p.id, p.value); }
+}
+
+async function setPick(kind, id, value) {
+  const g = D().games.find((x) => x.id === id);
+  if (!g || isLocked(g)) return;
+  if (!playerName()) { pendingPick = { kind, id, value }; askName(); return; }
+  const key = kind === "side" ? "picks" : "totals";
+  const mine = picks(key), before = mine[id];
+  const removing = before === value;
+  if (removing) delete mine[id]; else mine[id] = value;
+  save(`${key}_${state.league}`, mine);
+  render();
+  if (!db) return;
+  try {
+    if (!session) {
+      const { data, error } = await db.auth.signInAnonymously();
+      if (error) throw error;
+      session = data.session;
+    }
+    const q = db.from("picks");
+    const res = removing
+      ? await q.delete().eq("user_id", session.user.id).eq("game_id", id).eq("kind", kind)
+      : await q.upsert({
+          user_id: session.user.id, name: playerName(), league: state.league, game_id: id,
+          matchup: `${g.away} at ${g.home}`, kind, choice: value,
+          line: kind === "side" ? g.spread : g.total, kickoff: g.kickoff, updated_at: new Date().toISOString(),
+        });
+    if (res.error) throw res.error;
+  } catch (err) {
+    if (before === undefined) delete mine[id]; else mine[id] = before;
+    save(`${key}_${state.league}`, mine);
+    render();
+    toast(String(err && err.message || "").includes("row-level security") ? "Picks are closed for this game." : "Couldn't save your pick. Check your connection and try again.");
+  }
+}
+
+// ---------- administrator ----------
 function openAdmin() {
   $("#admin-status").textContent = "";
-  $("#admin-token").value = "";
-  $("#admin-connected").hidden = !adminToken();
-  $("#admin-setup").hidden = !!adminToken();
-  if (adminToken()) { renderAdminList(); renderDeadlineForm(); }
+  $("#admin-setup").hidden = isAdmin();
+  $("#admin-connected").hidden = !isAdmin();
+  if (isAdmin()) { renderAdminList(); renderDeadlineForm(); }
   $("#admin").showModal();
 }
 
-async function connectAdmin() {
-  const token = $("#admin-token").value.trim();
-  if (!token) return;
-  $("#admin-status").textContent = "Checking…";
-  try {
-    const r = await fetch(`https://api.github.com/repos/${REPO}`, { headers: { Authorization: `Bearer ${token}` } });
-    const info = r.ok ? await r.json() : null;
-    if (!info || !info.permissions || !info.permissions.push) throw new Error();
-    save("admin_token", token);
-    $("#admin-status").textContent = "";
-    $("#admin-setup").hidden = true;
-    $("#admin-connected").hidden = false;
-    renderAdminList();
-    renderDeadlineForm();
-    render();
-  } catch {
-    $("#admin-status").textContent = "That key didn't work. Check that it's for the gridiron-edge project with Contents set to “Read and write”.";
-  }
+async function adminSignIn() {
+  if (!db) { $("#admin-status").textContent = "The database isn't set up yet."; return; }
+  const email = $("#admin-email").value.trim(), password = $("#admin-password").value;
+  if (!email || !password) { $("#admin-status").textContent = "Enter your email and password."; return; }
+  $("#admin-status").textContent = "Signing in…";
+  const { error } = await db.auth.signInWithPassword({ email, password });
+  if (error) { $("#admin-status").textContent = "That email and password didn't work."; return; }
+  await refreshSession();
+  if (!isAdmin()) { $("#admin-status").textContent = "Signed in, but this account isn't the administrator."; return; }
+  $("#admin-password").value = "";
+  $("#admin-status").textContent = "";
+  openAdmin();
+  await loadMyPicks();
+  render();
+}
+
+async function adminSignOut() {
+  await db.auth.signOut();
+  session = null; adminFlag = false;
+  $("#admin").close();
+  if (state.tab === "picks") state.tab = "week";
+  render();
 }
 
 function renderAdminList() {
@@ -479,60 +556,36 @@ async function submitAdjust(useVegas) {
     if (!Object.keys(entry).length) entry = null;
   }
   $("#adj-status").textContent = "Saving…";
-  const ok = await saveLine(g.id, entry);
-  if (ok) $("#adjust").close();
-}
-
-/** Reads a JSON file from the GitHub project, changes it, and saves it back. Returns the new contents or null. */
-async function saveFile(path, change, message, setStatus) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const cur = await gh(`contents/${path}?ref=main&t=${Date.now()}`, { cache: "no-store" });
-      if (cur.status === 401 || cur.status === 403) { setStatus("Your admin key has expired or was removed. Open the admin panel (add #admin to the address) and connect again."); return null; }
-      const file = cur.status === 404 ? null : await cur.json();
-      const data = file ? JSON.parse(decodeURIComponent(escape(atob(file.content.replace(/\n/g, "")))) || "{}") : {};
-      change(data);
-      const body = JSON.stringify(data, null, 2) + "\n";
-      const put = await gh(`contents/${path}`, {
-        method: "PUT",
-        body: JSON.stringify({ message, content: btoa(unescape(encodeURIComponent(body))), branch: "main", ...(file ? { sha: file.sha } : {}) }),
-      });
-      if (put.status === 409) continue; // someone else saved at the same moment: try again
-      if (!put.ok) throw new Error(put.status);
-      setStatus("");
-      return data;
-    } catch {
-      setStatus("Couldn't save. Check your internet connection and try again.");
-      return null;
-    }
-  }
-  setStatus("Couldn't save. Try again.");
-  return null;
+  if (await saveLine(g.id, entry)) $("#adjust").close();
 }
 
 async function saveLine(id, entry) {
-  const setStatus = (t) => { const el = $("#adjust").open ? $("#adj-status") : $("#admin-status"); el.textContent = t; };
-  const lines = await saveFile(LINES_PATH, (d) => { if (entry) d[id] = entry; else delete d[id]; },
-    entry ? `Adjust line for ${id}` : `Use Vegas line for ${id}`, setStatus);
-  if (!lines) return false;
-  state.overrides = lines;
+  const setStatus = (t) => { ($("#adjust").open ? $("#adj-status") : $("#admin-status")).textContent = t; };
+  const res = entry
+    ? await db.from("lines").upsert({ game_id: id, spread: entry.spread ?? null, total: entry.total ?? null, updated_at: new Date().toISOString() })
+    : await db.from("lines").delete().eq("game_id", id);
+  if (res.error) { setStatus("Couldn't save. Check your connection and try again."); return false; }
+  if (entry) state.overrides[id] = entry; else delete state.overrides[id];
   for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
+  setStatus("");
   render();
-  toast("Saved. Everyone will see the new line in about 2 minutes.");
+  toast("Saved. Everyone sees the new line right away.");
   return true;
 }
 
 /** Sets (or with null, removes) the time when all picks close. */
 async function saveDeadline(date) {
-  const setStatus = (t) => { $("#deadline-status").textContent = t; };
-  setStatus("Saving…");
-  const settings = await saveFile(SETTINGS_PATH, (d) => { if (date) d.picks_close = date.toISOString(); else delete d.picks_close; },
-    date ? "Set the pick deadline" : "Remove the pick deadline", setStatus);
-  if (!settings) return;
-  state.settings = settings;
+  const status = $("#deadline-status");
+  status.textContent = "Saving…";
+  const res = date
+    ? await db.from("settings").upsert({ key: "picks_close", value: date.toISOString(), updated_at: new Date().toISOString() })
+    : await db.from("settings").delete().eq("key", "picks_close");
+  if (res.error) { status.textContent = "Couldn't save. Check your connection and try again."; return; }
+  status.textContent = "";
+  if (date) state.settings.picks_close = date.toISOString(); else delete state.settings.picks_close;
   renderDeadlineForm();
   render();
-  toast(date ? "Deadline saved. Everyone will see it in about 2 minutes." : "Deadline removed. Everyone will see it in about 2 minutes.");
+  toast(date ? "Deadline saved. It applies to everyone right away." : "Deadline removed.");
 }
 
 function renderDeadlineForm() {
@@ -544,6 +597,82 @@ function renderDeadlineForm() {
     : "No deadline. Each game locks when it starts.";
 }
 
+// ---------- All Picks (administrator only) ----------
+async function loadAllPicks() {
+  if (!isAdmin()) return;
+  state.allPicksStatus = "Loading picks…";
+  render();
+  const league = state.league, rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from("picks").select("name,game_id,matchup,kind,choice,line,updated_at,user_id")
+      .eq("league", league).order("updated_at", { ascending: true }).range(from, from + 999);
+    if (error) { state.allPicksStatus = "Couldn't load picks. Try again."; render(); return; }
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
+  if (league !== state.league) return;
+  state.allPicks = rows;
+  state.allPicksStatus = "";
+  render();
+}
+
+function choiceLabel(g, p) {
+  if (p.kind === "total") return `${ouLabel(p.choice)} ${p.line != null ? pts(Number(p.line)) : ""}`.trim();
+  if (!g) return p.choice;
+  const line = p.line == null ? "" : lineFor({ ...g, spread: Number(p.line) }, p.choice);
+  return `${shortName(team(g, p.choice))} ${line}`.trim();
+}
+
+function renderAllPicks() {
+  let html = `<h1>All Picks</h1><p class="sub">Only you can see this page.</p>`;
+  if (state.allPicksStatus) return html + `<div class="empty">${esc(state.allPicksStatus)}</div>`;
+  if (!state.allPicks) return html + `<div class="empty">Loading picks…</div>`;
+  const rows = state.allPicks;
+  const games = new Map(D().games.map((g) => [g.id, g]));
+  const weeks = [...new Set(rows.map((p) => games.get(p.game_id)?.week).filter((w) => w != null))].sort((a, b) => b - a);
+  if (!weeks.length) return html + `<div class="toolbar"><button class="pick" id="picks-refresh">Refresh</button></div><div class="empty">No ${LEAGUES[state.league]} picks yet.</div>`;
+  const w = weeks.includes(state.picksWeek) ? state.picksWeek : weeks[0];
+  const inWeek = rows.filter((p) => games.get(p.game_id)?.week === w);
+  const players = new Set(inWeek.map((p) => p.user_id));
+  html += `<div class="toolbar"><label for="picks-week">Week:</label><select id="picks-week">${weeks.map((x) => `<option value="${x}" ${x === w ? "selected" : ""}>${esc(weekLabel(x))}</option>`).join("")}</select>
+    <button class="pick" id="picks-refresh">Refresh</button><button class="pick" id="picks-csv">Download spreadsheet</button></div>
+    <p class="note">${players.size} ${players.size === 1 ? "player" : "players"} made ${inWeek.length} ${inWeek.length === 1 ? "pick" : "picks"} this week.</p><div class="cards">`;
+  const byGame = new Map();
+  for (const p of inWeek) { if (!byGame.has(p.game_id)) byGame.set(p.game_id, []); byGame.get(p.game_id).push(p); }
+  const ordered = [...byGame.keys()].sort((a, b) => (games.get(a)?.kickoff || "").localeCompare(games.get(b)?.kickoff || ""));
+  for (const id of ordered) {
+    const g = games.get(id), list = byGame.get(id);
+    const group = (kind, choice) => list.filter((p) => p.kind === kind && p.choice === choice);
+    const box = (kind, choice) => {
+      const ps = group(kind, choice);
+      const label = kind === "side" ? `${g ? fullName(team(g, choice)) : choice}` : ouLabel(choice);
+      const result = g && isFinal(g) ? (kind === "side" ? (g.spread != null ? spreadWon(g, choice) : actualWinner(g) ? actualWinner(g) === choice : null) : totalWon(g, choice)) : undefined;
+      return `<div class="pick-group"><div class="pg-head"><b>${esc(label)}</b><span class="pg-count">${ps.length}</span>${result === true ? '<span class="v yes"></span>' : result === false ? '<span class="v no"></span>' : ""}</div>
+        <div class="pg-names">${ps.length ? ps.map((p) => `<span class="name-chip" title="${esc(choiceLabel(g, p))}">${esc(p.name)}${p.kind === "side" && g && p.line != null && Number(p.line) !== g.spread ? ` <small>(${esc(choiceLabel(g, p))})</small>` : ""}</span>`).join("") : '<span class="r">No picks</span>'}</div></div>`;
+    };
+    html += `<article class="card"><div class="card-head"><span class="matchup">${g ? `${esc(fullName(g.away))} at ${esc(fullName(g.home))}` : esc(list[0].matchup || id)}</span>
+      <span class="when">${g ? esc(when(g)) : ""}${g && isFinal(g) ? ` · Final ${g.away_score}-${g.home_score}` : ""}</span></div>
+      <div class="lines"><span><span class="label">Spread</span> ${g ? esc(g.spread != null ? lineText(g) : "No line") : ""}</span><span><span class="label">Over/under</span> ${g && g.total != null ? pts(g.total) : "—"}</span></div>
+      <div class="pick-grid">${box("side", "away")}${box("side", "home")}${list.some((p) => p.kind === "total") || (g && g.total != null) ? box("total", "over") + box("total", "under") : ""}</div></article>`;
+  }
+  return html + `</div><p class="note">A line in parentheses means the player picked before the line changed, at the line shown.</p>`;
+}
+
+function downloadPicks() {
+  const games = new Map(D().games.map((g) => [g.id, g]));
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [["Player", "Week", "Game", "Kickoff", "Pick type", "Pick", "Line", "Result", "Picked at"].map(q).join(",")];
+  for (const p of state.allPicks || []) {
+    const g = games.get(p.game_id);
+    const won = g && isFinal(g) ? (p.kind === "side" ? (p.line != null ? spreadWon({ ...g, spread: Number(p.line) }, p.choice) : actualWinner(g) === p.choice) : totalWon({ ...g, total: Number(p.line) }, p.choice)) : undefined;
+    lines.push([p.name, g?.week ?? "", p.matchup, g?.kickoff ?? "", p.kind === "side" ? "Team" : "Total", choiceLabel(g, p), p.line ?? "", won === true ? "Won" : won === false ? "Lost" : won === null ? "Push" : "", p.updated_at].map(q).join(","));
+  }
+  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: `gridiron-edge-${state.league}-picks.csv` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function toast(text) {
   const t = $("#toast");
   t.textContent = text;
@@ -551,3 +680,22 @@ function toast(text) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => { t.hidden = true; }, 5000);
 }
+
+// ---------- start ----------
+(async function start() {
+  if (!LEAGUES[state.league]) state.league = "nfl";
+  if (!["week", "results", "scorecard", "ratings", "picks"].includes(state.tab)) state.tab = "week";
+  render();
+  try { await refreshSession(); } catch { /* the site still works without the database */ }
+  await Promise.all([loadShared().catch(() => {}), loadLeague(state.league)]);
+  render();
+  loadMyPicks();
+  if (state.tab === "picks") loadAllPicks();
+  if (location.hash === "#admin") openAdmin();
+  // Keep locks, the deadline and adjusted lines current while the page stays open.
+  setInterval(async () => {
+    if (document.querySelector("dialog[open]")) return;
+    await loadShared().catch(() => {});
+    render();
+  }, 60000);
+})();

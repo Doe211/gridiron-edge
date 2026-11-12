@@ -30,6 +30,7 @@
   <button data-tab="results">Results</button>
   <button data-tab="scorecard">Scorecard</button>
   <button data-tab="ratings">Power Ratings</button>
+  <button data-tab="picks" id="tab-picks" hidden>All Picks</button>
 </nav>
 
 <main id="main" aria-live="polite"></main>
@@ -49,7 +50,7 @@
   <h3>Highlighted picks</h3>
   <p>A pick is highlighted in green when the model disagrees with Vegas by a lot: 3+ points on the spread, 5+ points on an NBA total, or 5+ points of win chance in MLB. That marks a big disagreement, not a better bet.</p>
   <h3>Your picks</h3>
-  <p>Your picks are saved in this browser only. Each game locks when it starts, and all picks lock at the deadline shown on This Week, if there is one.</p>
+  <p>Your picks are saved online under the name you enter, and the site's administrator can see them. Each game locks when it starts, and all picks lock at the deadline shown on This Week, if there is one.</p>
   <h3>Data</h3>
   <p>NFL data from nflverse. College data from CollegeFootballData.com. NBA games from balldontlie.io. MLB games from MLB's public stats service. NBA and MLB betting lines from The Odds API. Lines marked “Adjusted line” were set by Gridiron Edge. Lines change during the week, so the line shown may differ from what a sportsbook offers right now.</p>
   <h3>For entertainment</h3>
@@ -84,14 +85,19 @@
   <form method="dialog"><button class="close" aria-label="Close">×</button></form>
   <h2>Administrator</h2>
   <div id="admin-setup">
-    <p>Paste your GitHub admin key to adjust lines on this device. It stays in this browser only.</p>
-    <label class="field">Admin key
-      <input id="admin-token" type="password" autocomplete="off" spellcheck="false">
-    </label>
-    <div class="dialog-actions"><button class="pick primary" id="admin-save">Connect</button></div>
+    <p>Sign in as the administrator to see everyone's picks, set the pick deadline, and adjust lines.</p>
+    <form id="signin-form">
+      <label class="field">Email
+        <input id="admin-email" type="email" autocomplete="username">
+      </label>
+      <label class="field">Password
+        <input id="admin-password" type="password" autocomplete="current-password">
+      </label>
+      <div class="dialog-actions"><button class="pick primary" id="admin-signin" type="submit">Sign in</button></div>
+    </form>
   </div>
   <div id="admin-connected" hidden>
-    <p>Admin mode is on. Each upcoming game has an <b>Adjust line</b> button.</p>
+    <p>You're signed in as the administrator. The <b>All Picks</b> tab shows who picked what, and each upcoming game has an <b>Adjust line</b> button.</p>
     <h3>Pick deadline</h3>
     <p class="note" id="deadline-now"></p>
     <label class="field">Close all picks at
@@ -105,13 +111,27 @@
     <p class="status" id="deadline-status" role="status"></p>
     <h3>Adjusted lines</h3>
     <div class="table" id="admin-list"></div>
-    <div class="dialog-actions"><button class="pick" id="admin-off">Turn off admin mode on this device</button></div>
+    <div class="dialog-actions"><button class="pick" id="admin-signout">Sign out on this device</button></div>
   </div>
   <p class="status" id="admin-status" role="status"></p>
 </dialog>
 
+<dialog id="name">
+  <form id="name-form">
+    <h2 id="name-title">What's your name?</h2>
+    <p class="note">Your picks are saved under this name.</p>
+    <label class="field">Name
+      <input id="name-input" maxlength="40" autocomplete="nickname">
+    </label>
+    <p class="status" id="name-status" role="status"></p>
+    <div class="dialog-actions"><button class="pick primary" id="name-save" type="submit">Save</button></div>
+  </form>
+</dialog>
+
 <div class="toast" id="toast" role="status" hidden></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
