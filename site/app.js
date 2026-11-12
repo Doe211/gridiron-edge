@@ -189,7 +189,8 @@ function renderWeek() {
     html += picksClosed() ? `<div class="deadline closed">🔒 Picks are closed.</div>` : `<div class="deadline">⏰ Picks close ${esc(t)}</div>`;
   }
   const name = playerName();
-  html += `<div class="player">${name ? `Picking as <b>${esc(name)}</b> · <button class="link" id="change-name">Change name</button>` : "Enter your name when you make your first pick."}</div>`;
+  const num = load("player_number", null);
+  html += `<div class="player">${name ? `Picking as <b>${esc(name)}</b>${num ? ` · Player <b>#${num}</b>` : ""} · <button class="link" id="change-name">Change name</button>` : "Enter your name when you make your first pick."}</div>`;
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
   html += `<p class="note">Tap a team to pick it${pickMode() === "spread" ? " against the spread" : ""}, and tap Over or Under for the total. Tap again to change your mind. Each game locks when it starts${dl ? ", and all picks lock at the deadline" : ""}.</p>`;
   return html;
@@ -445,6 +446,15 @@ async function nameSaved() {
   if (pendingPick) { const p = pendingPick; pendingPick = null; setPick(p.kind, p.id, p.value); }
 }
 
+/** Makes sure this player has a permanent player number, so players with the same name can be told apart. */
+async function ensurePlayer() {
+  if (!db || !session || !playerName()) return;
+  try {
+    const { data, error } = await db.from("players").upsert({ user_id: session.user.id, name: playerName() }).select("number").single();
+    if (!error && data) { save("player_number", data.number); render(); }
+  } catch { /* picks still work without a number */ }
+}
+
 async function setPick(kind, id, value) {
   const g = D().games.find((x) => x.id === id);
   if (!g || isLocked(g)) return;
@@ -462,6 +472,7 @@ async function setPick(kind, id, value) {
       if (error) throw error;
       session = data.session;
     }
+    if (!load("player_number", null)) await ensurePlayer();
     const q = db.from("picks");
     const res = removing
       ? await q.delete().eq("user_id", session.user.id).eq("game_id", id).eq("kind", kind)
@@ -611,6 +622,10 @@ async function loadAllPicks() {
     if (data.length < 1000) break;
   }
   if (league !== state.league) return;
+  const numbers = {};
+  const players = await db.from("players").select("user_id,number");
+  for (const pl of players.data || []) numbers[pl.user_id] = pl.number;
+  state.playerNumbers = numbers;
   state.allPicks = rows;
   state.allPicksStatus = "";
   render();
@@ -622,6 +637,17 @@ function choiceLabel(g, p) {
   const line = p.line == null ? "" : lineFor({ ...g, spread: Number(p.line) }, p.choice);
   return `${shortName(team(g, p.choice))} ${line}`.trim();
 }
+
+/** Whether a player's pick won (true), lost (false) or pushed (null), judged at the line they picked at. undefined until the game is final. */
+function pickResult(g, p) {
+  if (!g || !isFinal(g)) return undefined;
+  const line = p.line == null ? null : Number(p.line);
+  if (p.kind === "total") return totalWon(line == null ? g : { ...g, total: line }, p.choice);
+  if (line != null) return spreadWon({ ...g, spread: line }, p.choice);
+  const a = actualWinner(g);
+  return a ? a === p.choice : null;
+}
+const playerTag = (p) => `${p.name}${state.playerNumbers?.[p.user_id] ? ` #${state.playerNumbers[p.user_id]}` : ""}`;
 
 function renderAllPicks() {
   let html = `<h1>All Picks</h1><p class="sub">Only you can see this page.</p>`;
@@ -648,24 +674,30 @@ function renderAllPicks() {
       const label = kind === "side" ? `${g ? fullName(team(g, choice)) : choice}` : ouLabel(choice);
       const result = g && isFinal(g) ? (kind === "side" ? (g.spread != null ? spreadWon(g, choice) : actualWinner(g) ? actualWinner(g) === choice : null) : totalWon(g, choice)) : undefined;
       return `<div class="pick-group"><div class="pg-head"><b>${esc(label)}</b><span class="pg-count">${ps.length}</span>${result === true ? '<span class="v yes"></span>' : result === false ? '<span class="v no"></span>' : ""}</div>
-        <div class="pg-names">${ps.length ? ps.map((p) => `<span class="name-chip" title="${esc(choiceLabel(g, p))}">${esc(p.name)}${p.kind === "side" && g && p.line != null && Number(p.line) !== g.spread ? ` <small>(${esc(choiceLabel(g, p))})</small>` : ""}</span>`).join("") : '<span class="r">No picks</span>'}</div></div>`;
+        <div class="pg-names">${ps.length ? ps.map((p) => {
+          const r = pickResult(g, p);
+          const cls = r === false ? " out" : r === true ? " won" : "";
+          const mark = r === false ? "✗ " : r === true ? "✓ " : "";
+          const atLine = (p.kind === "side" ? g && p.line != null && Number(p.line) !== g.spread : g && p.line != null && Number(p.line) !== g.total) ? ` <small>(${esc(choiceLabel(g, p))})</small>` : "";
+          return `<span class="name-chip${cls}" title="${esc(choiceLabel(g, p))}${r === false ? " — lost" : r === true ? " — won" : ""}">${mark}<span class="nm">${esc(playerTag(p))}</span>${atLine}</span>`;
+        }).join("") : '<span class="r">No picks</span>'}</div></div>`;
     };
     html += `<article class="card"><div class="card-head"><span class="matchup">${g ? `${esc(fullName(g.away))} at ${esc(fullName(g.home))}` : esc(list[0].matchup || id)}</span>
       <span class="when">${g ? esc(when(g)) : ""}${g && isFinal(g) ? ` · Final ${g.away_score}-${g.home_score}` : ""}</span></div>
       <div class="lines"><span><span class="label">Spread</span> ${g ? esc(g.spread != null ? lineText(g) : "No line") : ""}</span><span><span class="label">Over/under</span> ${g && g.total != null ? pts(g.total) : "—"}</span></div>
       <div class="pick-grid">${box("side", "away")}${box("side", "home")}${list.some((p) => p.kind === "total") || (g && g.total != null) ? box("total", "over") + box("total", "under") : ""}</div></article>`;
   }
-  return html + `</div><p class="note">A line in parentheses means the player picked before the line changed, at the line shown.</p>`;
+  return html + `</div><p class="note">Each player has a permanent number, so two players with the same name show different numbers. A crossed-out name with ✗ is a losing pick; ✓ is a winner. A line in parentheses means the player picked before the line changed, and the pick is judged at that line.</p>`;
 }
 
 function downloadPicks() {
   const games = new Map(D().games.map((g) => [g.id, g]));
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [["Player", "Week", "Game", "Kickoff", "Pick type", "Pick", "Line", "Result", "Picked at"].map(q).join(",")];
+  const lines = [["Player", "Player #", "Week", "Game", "Kickoff", "Pick type", "Pick", "Line", "Result", "Picked at"].map(q).join(",")];
   for (const p of state.allPicks || []) {
     const g = games.get(p.game_id);
-    const won = g && isFinal(g) ? (p.kind === "side" ? (p.line != null ? spreadWon({ ...g, spread: Number(p.line) }, p.choice) : actualWinner(g) === p.choice) : totalWon({ ...g, total: Number(p.line) }, p.choice)) : undefined;
-    lines.push([p.name, g?.week ?? "", p.matchup, g?.kickoff ?? "", p.kind === "side" ? "Team" : "Total", choiceLabel(g, p), p.line ?? "", won === true ? "Won" : won === false ? "Lost" : won === null ? "Push" : "", p.updated_at].map(q).join(","));
+    const won = pickResult(g, p);
+    lines.push([p.name, state.playerNumbers?.[p.user_id] ?? "", g?.week ?? "", p.matchup, g?.kickoff ?? "", p.kind === "side" ? "Team" : "Total", choiceLabel(g, p), p.line ?? "", won === true ? "Won" : won === false ? "Lost" : won === null ? "Push" : "", p.updated_at].map(q).join(","));
   }
   const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
   const a = Object.assign(document.createElement("a"), { href: url, download: `gridiron-edge-${state.league}-picks.csv` });
@@ -690,6 +722,7 @@ function toast(text) {
   await Promise.all([loadShared().catch(() => {}), loadLeague(state.league)]);
   render();
   loadMyPicks();
+  if (session && playerName() && !load("player_number", null)) ensurePlayer();
   if (state.tab === "picks") loadAllPicks();
   if (location.hash === "#admin") openAdmin();
   // Keep locks, the deadline and adjusted lines current while the page stays open.

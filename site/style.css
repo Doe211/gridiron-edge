@@ -191,3 +191,6 @@ dialog p { margin: 4px 0; color: var(--text); }
 .pg-names { display: flex; flex-wrap: wrap; gap: 6px; }
 .name-chip { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; font-size: 14px; }
 .name-chip small { color: var(--muted); }
+.name-chip.out { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); color: var(--bad); }
+.name-chip.out .nm { text-decoration: line-through; text-decoration-thickness: 2px; }
+.name-chip.won { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); font-weight: 600; }
