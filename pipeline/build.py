@@ -68,10 +68,8 @@ def finish(league, games, ratings, *, history_from, pick_mode, names=None, ranke
         "names": names or {}, "ranked": ranked, "games": shown, "message": message,
     })
     print(f"{league}: {len(shown)} games written (season {current})")
-    try:
-        sync_games(league, [g for g in games if g["season"] == current])
-    except Exception as e:  # the website still works; tickets for this league just can't be checked
-        print(f"{league}: couldn't send games to the database: {e}")
+    # The database downloads these published files itself every 30 minutes (supabase/sync_games.sql),
+    # so no database key is needed here. sync_games() remains for setups that use a secret key.
 
 
 SUPABASE_URL = "https://ryddmapuqqbuyzwvxnbe.supabase.co"

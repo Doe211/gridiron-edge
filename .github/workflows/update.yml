@@ -46,7 +46,6 @@ jobs:
           CFBD_KEY: ${{ secrets.CFBD_KEY }}
           BDL_KEY: ${{ secrets.BDL_KEY }}
           ODDS_KEY: ${{ secrets.ODDS_KEY }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           GE_CACHE: .cache
         run: python pipeline/build.py
 
