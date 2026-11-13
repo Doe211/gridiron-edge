@@ -31,10 +31,22 @@ const picks = (kind) => (state.myLegs[state.league] || {})[kind] || {};
 // The ticket being built on This Week, before it's placed. kind: "picks" (teams) or "totals".
 const draft = (kind) => load(`draft_${kind}_${state.league}`, {});
 
-// Tickets: 3 to 8 picks, all must win. Pays this many coins per coin wagered (plus the wager back).
-const PAYOUT = { 3: 5, 4: 10, 5: 15, 6: 30, 7: 80, 8: 150 };
+// Tickets: 3 to 12 picks with one wager. Pays by the chart below, in coins won per coin wagered.
+// PAYOUT[picks][winning picks] = coins won per coin wagered. A 10-pick ticket also pays
+// for 9 of 10 and for 0 of 10.
+const PAYOUT = {
+  3: { 3: 5 }, 4: { 4: 10 }, 5: { 5: 20 }, 6: { 6: 35 }, 7: { 7: 60 }, 8: { 8: 100 },
+  9: { 9: 150 }, 10: { 10: 200, 9: 25, 0: 20 }, 11: { 11: 300 }, 12: { 12: 500 },
+};
+const fullPay = (n) => (PAYOUT[n] || {})[n];
+/** "10 for 10 pays 200 for 1 (also 9 of 10 pays 25, 0 of 10 pays 20)" */
+function payText(n) {
+  const extras = Object.entries(PAYOUT[n] || {}).filter(([w]) => Number(w) !== n)
+    .sort((a, b) => b[0] - a[0]).map(([w, x]) => `${w} of ${n} pays ${x}`);
+  return `${n} for ${n} pays ${fullPay(n)} for 1${extras.length ? ` (also ${extras.join(", ")})` : ""}`;
+}
 const COIN = "🪙";
-const MIN_LEGS = 3, MAX_LEGS = 8, MAX_WAGER = 100;
+const MIN_LEGS = 3, MAX_LEGS = 12, MAX_WAGER = 100;
 const coins = (n) => `${Number.isInteger(n) ? n : n.toFixed(1)} ${COIN}`;
 
 // ---------- helpers ----------
@@ -198,7 +210,7 @@ function renderWeek() {
     const t = dl.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     html += picksClosed() ? `<div class="deadline closed">🔒 Picks are closed.</div>` : `<div class="deadline">⏰ Picks close ${esc(t)}</div>`;
   }
-  html += `<p class="note">Build a ticket: tap ${MIN_LEGS} to ${MAX_LEGS} picks (teams against the spread and Over/Under totals), choose your wager, and place it. Every pick must win. Once placed, a ticket can't be changed.</p>`;
+  html += `<p class="note">Build a ticket: tap ${MIN_LEGS} to ${MAX_LEGS} picks (teams against the spread and Over/Under totals), choose your wager, and place it. Every pick must win (a 10-pick ticket also pays for 9 of 10 or 0 of 10). Once placed, a ticket can't be changed.</p>`;
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
   html += ticketBar();
   return html;
@@ -439,10 +451,10 @@ const legLabel = (l, line) => l.kind === "side"
 function ticketBar() {
   const legs = draftLegs(), n = legs.length, wager = load("wager", 5);
   const ready = n >= MIN_LEGS && n <= MAX_LEGS && !picksClosed();
-  const toWin = ready ? PAYOUT[n] * wager : null;
+  const toWin = ready ? fullPay(n) * wager : null;
   return `<div class="ticket-bar">
     <div class="tb-row"><b>Your ticket: ${n} ${n === 1 ? "pick" : "picks"}</b>
-      <span class="r">${n < MIN_LEGS ? `Pick ${MIN_LEGS - n} more to place a ticket` : n > MAX_LEGS ? `Too many picks (max ${MAX_LEGS})` : `${n} for ${n} pays ${PAYOUT[n]} to 1`}</span></div>
+      <span class="r">${n < MIN_LEGS ? `Pick ${MIN_LEGS - n} more to place a ticket` : n > MAX_LEGS ? `Too many picks (max ${MAX_LEGS})` : payText(n)}</span></div>
     ${n ? `<div class="tb-legs">${legs.map((l) => `<span class="name-chip">${esc(legLabel(l))}</span>`).join("")}</div>` : ""}
     <div class="tb-row">
       <label class="tb-wager">Wager <input id="wager" type="number" inputmode="numeric" min="1" max="${MAX_WAGER}" step="1" value="${wager}"> ${COIN}</label>
@@ -479,7 +491,7 @@ function openReview() {
   if (legs.length < MIN_LEGS || legs.length > MAX_LEGS) return;
   if (!(wager >= 1 && wager <= MAX_WAGER)) { toast(`Wager 1 to ${MAX_WAGER} ${COIN}.`); return; }
   $("#review-legs").innerHTML = legs.map((l) => `<li>${esc(legLabel(l))}<small> · ${esc(when(l.g))}</small></li>`).join("");
-  $("#review-summary").innerHTML = `${legs.length} for ${legs.length} pays ${PAYOUT[legs.length]} to 1 · Wager <b>${coins(wager)}</b> · To win <b>${coins(PAYOUT[legs.length] * wager)}</b>`;
+  $("#review-summary").innerHTML = `${payText(legs.length)} · Wager <b>${coins(wager)}</b> · To win <b>${coins(fullPay(legs.length) * wager)}</b>`;
   $("#review-name").value = playerName();
   $("#review-status").textContent = "";
   $("#review").showModal();
@@ -518,20 +530,28 @@ async function placeTicket() {
   }
 }
 
-/** Grades a ticket. Any losing pick loses it; a push drops that pick and pays the smaller ticket;
- *  fewer than 3 winners left returns the wager. */
+/** Grades a ticket using the payout chart. A push drops that pick and the ticket is graded
+ *  as the smaller ticket; with fewer than 3 picks left and no losses, the wager is returned. */
 function gradeTicket(t, legs, games) {
-  let wins = 0, lost = false, pending = false;
+  let wins = 0, losses = 0, pushes = 0, pending = 0;
   for (const l of legs) {
     const r = pickResult(games.get(l.game_id), l);
-    if (r === false) lost = true;
+    if (r === false) losses++;
     else if (r === true) wins++;
-    else if (r === undefined) pending = true;
+    else if (r === null) pushes++;
+    else pending++;
   }
-  if (lost) return { status: "lost", net: -t.wager, label: "Lost" };
-  if (pending) return { status: "pending", net: 0, label: "Pending" };
-  if (wins < MIN_LEGS) return { status: "refund", net: 0, label: "Wager returned" };
-  return { status: "won", net: PAYOUT[wins] * t.wager, label: `Won ${wins} for ${wins}` };
+  const row = PAYOUT[legs.length] || {};
+  if (pending) {
+    // Lost already if no line of the chart can still be reached.
+    const reachable = Object.keys(row).some((w) => Number(w) >= wins && Number(w) <= wins + pending + pushes && legs.length - Number(w) >= losses);
+    return losses && !reachable ? { status: "lost", net: -t.wager, label: "Lost" } : { status: "pending", net: 0, label: "Pending" };
+  }
+  const n = legs.length - pushes;
+  if (n < MIN_LEGS) return losses ? { status: "lost", net: -t.wager, label: "Lost" } : { status: "refund", net: 0, label: "Wager returned" };
+  const x = (PAYOUT[n] || {})[wins];
+  if (x == null) return { status: "lost", net: -t.wager, label: "Lost" };
+  return { status: "won", net: x * t.wager, label: `Won ${wins} of ${n}` };
 }
 
 /** Loads the tickets placed from this device for the current league. */
@@ -559,7 +579,7 @@ function ticketCard(t, games, admin = false) {
       const label = g ? legLabel({ ...l, g }, Number(l.line)) : `${l.matchup}: ${l.choice} ${l.line}`;
       return `<li class="${r === false ? "out" : r === true ? "won" : ""}">${r === false ? "✗" : r === true ? "✓" : r === null ? "–" : "•"} <span class="nm">${esc(label)}</span>${g && isFinal(g) ? `<small> · Final ${g.away_score}-${g.home_score}</small>` : ""}</li>`;
     }).join("")}</ul>
-    <div class="tb-row"><span>Wager <b>${coins(t.wager)}</b> · ${t.legs} for ${t.legs} pays ${PAYOUT[t.legs]} to 1</span><span class="spacer"></span>
+    <div class="tb-row"><span>Wager <b>${coins(t.wager)}</b> · ${payText(t.legs)}</span><span class="spacer"></span>
       <span class="status-pill ${grade.status}">${esc(grade.label)}${grade.status === "won" ? ` +${coins(grade.net)}` : grade.status === "lost" ? ` −${coins(t.wager)}` : ""}</span>
       ${admin ? `<button class="pick" data-void="${t.number}">Void</button>` : ""}</div>
   </article>`;
@@ -766,7 +786,7 @@ function renderAllPicks() {
     + graded.map(({ t, grade }) => `<div class="row"><span class="t"><b>#${t.number}</b> ${esc(t.name)}</span><span class="c">${t.legs}</span><span class="c">${t.wager}</span>
       <span class="c wide status-pill ${grade.status}">${esc(grade.status === "won" ? `+${coins(grade.net)}` : grade.status === "lost" ? `−${coins(t.wager)}` : grade.label)}</span></div>`).join("") + `</div>`;
   html += `<h2>Every ticket</h2><div class="cards">${graded.map(({ t }) => ticketCard(t, games, true)).join("")}</div>`;
-  return html + `<p class="note">A ✗ is a losing pick, which loses the whole ticket. A push drops that pick, and the ticket is paid at the smaller size; with fewer than ${MIN_LEGS} winning picks left, the wager is returned. Each pick is judged at the line when the ticket was placed. Void removes a ticket for good.</p>`;
+  return html + `<p class="note">A ✗ is a losing pick. Any loss loses the ticket, except that a 10-pick ticket still pays for 9 of 10 or 0 of 10. A push drops that pick, and the ticket is paid at the smaller size; with fewer than ${MIN_LEGS} winning picks left, the wager is returned. Each pick is judged at the line when the ticket was placed. Void removes a ticket for good.</p>`;
 }
 
 function downloadPicks() {
