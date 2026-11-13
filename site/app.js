@@ -805,7 +805,7 @@ function toast(text) {
 // ---------- start ----------
 (async function start() {
   if (!LEAGUES[state.league]) state.league = "nfl";
-  if (!["week", "tickets", "results", "scorecard", "ratings", "picks"].includes(state.tab)) state.tab = "week";
+  if (!["week", "tickets", "results", "picks"].includes(state.tab)) state.tab = "week";
   render();
   try { await refreshSession(); } catch { /* the site still works without the database */ }
   await Promise.all([loadShared().catch(() => {}), loadLeague(state.league)]);
