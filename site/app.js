@@ -212,32 +212,24 @@ function renderResults() {
     .sort((a, b) => (a.kickoff || "").localeCompare(b.kickoff || ""));
   let html = `<h1>${esc(weekLabel(w))} Results</h1>
     <div class="toolbar"><label for="week">Week:</label><select id="week">${weeks.map((x) => `<option value="${x}" ${x === w ? "selected" : ""}>${esc(weekLabel(x))}</option>`).join("")}</select></div>
-    <div class="summary">${stat("Model, winners", rec(modelSU(games)))}${pickMode() === "spread" ? stat("Model vs spread", rec(modelATS(games))) : ""}${stat(pickMode() === "spread" ? "You vs spread" : "You, winners", rec(yourRecord(games)))}`;
-  if (hasTotals()) {
-    const mo = modelOU(games), yo = yourOU(games);
-    if (mo.w + mo.l) html += stat("Model O/U", rec(mo));
-    if (yo.w + yo.l) html += stat("You O/U", rec(yo));
-  }
-  html += `</div><div class="cards">`;
-  const mine = picks("picks"), myT = picks("totals");
+    <div class="cards">`;
   for (const g of games) {
-    const v = [verdict(`Model winner: ${shortName(team(g, modelWinner(g)))}`, actualWinner(g) ? modelWinner(g) === actualWinner(g) : null)];
-    const fav = vegasFavorite(g);
-    if (fav) v.push(verdict(`Vegas favorite: ${shortName(team(g, fav))}`, actualWinner(g) ? fav === actualWinner(g) : null));
-    const p = modelSpreadPick(g);
-    if (p) v.push(verdict(`Model ATS: ${shortName(team(g, p))} ${lineFor(g, p)}`, spreadWon(g, p)));
-    const y = mine[g.id];
-    if (y && pickMode() === "winner") v.push(verdict(`You: ${shortName(team(g, y))}`, actualWinner(g) ? y === actualWinner(g) : null));
-    else if (y && g.spread != null) v.push(verdict(`You: ${shortName(team(g, y))} ${lineFor(g, y)}`, spreadWon(g, y)));
-    let t = "";
-    if (hasTotals() && g.total != null) {
-      const tv = [], mp = modelTotalPick(g), yp = myT[g.id];
-      if (mp) tv.push(verdict(`Model: ${ouLabel(mp)}`, totalWon(g, mp)));
-      if (yp) tv.push(verdict(`You: ${ouLabel(yp)}`, totalWon(g, yp)));
-      t = tv.length ? `<div class="verdicts">${tv.join("")}</div>` : "";
+    const winner = actualWinner(g);
+    const teamRow = (side) => `<div class="score-row${winner === side ? " win" : ""}"><span>${esc(fullName(team(g, side)))}</span><b>${side === "home" ? g.home_score : g.away_score}</b></div>`;
+    const m = margin(g);
+    let cover = "";
+    if (g.spread != null) {
+      cover = m === g.spread ? `Spread ${esc(lineText(g))}: push`
+        : `Covered: <b>${esc(shortName(team(g, m > g.spread ? "home" : "away")))} ${esc(lineFor(g, m > g.spread ? "home" : "away"))}</b>`;
     }
-    const info = [g.spread != null ? `Line: ${lineText(g)}` : "", hasTotals() && g.total != null ? `Total ${actualTotal(g)} (O/U ${pts(g.total)})` : ""].filter(Boolean).join(" · ");
-    html += `<article class="card result"><div class="card-head"><span class="score">${esc(shortName(g.away))} ${g.away_score} at ${esc(shortName(g.home))} ${g.home_score}</span><span class="line-info">${esc(info)}</span></div><div class="verdicts">${v.join("")}</div>${t}</article>`;
+    let ou = "";
+    if (g.total != null) {
+      const t = actualTotal(g);
+      ou = t === g.total ? `Total ${t}: push on ${pts(g.total)}` : `Total ${t}: <b>${t > g.total ? "Over" : "Under"} ${pts(g.total)}</b>`;
+    }
+    html += `<article class="card result"><div class="card-head"><span class="when">${esc(when(g))}${g.neutral ? " · Neutral site" : ""}</span><span class="when">Final</span></div>
+      <div class="scores">${teamRow("away")}${teamRow("home")}</div>
+      ${cover || ou ? `<div class="lines">${cover ? `<span>${cover}</span>` : ""}${ou ? `<span>${ou}</span>` : ""}</div>` : ""}</article>`;
   }
   return html + "</div>";
 }
