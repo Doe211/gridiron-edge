@@ -284,3 +284,5 @@ dialog p { margin: 4px 0; color: var(--text); }
   .sq-team2 { width: 32px; }
 }
 .sq-sq .pn { display: block; font-size: 10px; font-weight: 700; color: #8a3a12; }
+.sq-money small { font-weight: 600; color: #55636f; }
+.sq-admin { margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--sq-strip); }

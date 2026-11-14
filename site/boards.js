@@ -34,7 +34,11 @@ async function loadBoards(quiet = false) {
 const playerTag = (row) => (row ? `${row.name}${row.player_no ? " #" + row.player_no : ""}` : "");
 const boardById = (id) => (state.boards || []).find((b) => b.id === id);
 const taken = (b) => (state.squares[b.id] || new Map()).size;
-const pot = (b) => b.price * taken(b);
+// The first 80 squares taken fill the pot. Squares 81-100 are the administrator's 20, sold for themselves.
+const POT_SQUARES = 80, ADMIN_SQUARES = 20;
+const potSquares = (b) => Math.min(taken(b), POT_SQUARES);
+const adminSold = (b) => Math.max(0, taken(b) - POT_SQUARES);
+const pot = (b) => b.price * potSquares(b);
 function prizeFor(b, q) {
   if (b.prizes) return b.prizes[q];
   const p = pot(b), each = Math.floor(p / 4);
@@ -83,7 +87,8 @@ function renderBoard(b) {
   html += `<section class="sq">
     <div class="sq-top">
       <div class="sq-brand"><div class="sq-title">${esc(b.title)}</div><div class="sq-kind">FOOTBALL SQUARES</div>
-        <div class="sq-money"><span>PRICE PER SQUARE</span><b>${coins(b.price)}</b><span>TOTAL POT</span><b>${coins(pot(b))}</b></div>
+        <div class="sq-money"><span>PRICE PER SQUARE</span><b>${coins(b.price)}</b><span>TOTAL POT</span><b>${coins(pot(b))} <small>(${potSquares(b)} of ${POT_SQUARES})</small></b></div>
+        ${adminSold(b) ? `<div class="sq-admin">Admin squares sold: ${adminSold(b)} of ${ADMIN_SQUARES}</div>` : ""}
         ${sc?.live ? `<div class="sq-live">LIVE · ${esc(b.team1)} ${sc.now[0]}, ${esc(b.team2)} ${sc.now[1]} · ${esc(sc.clock)}</div>` : ""}</div>
       <div class="sq-table">
         <span></span>${QUARTERS.map((q) => `<span class="sq-qh">${q}</span>`).join("")}
@@ -112,7 +117,7 @@ function renderBoard(b) {
     ? (b.top_digits ? "The numbers are drawn, so this board is locked." : "The game has started, so this board is closed.")
     : `Tap an open square to put your name on it. ${open} of 100 squares are open.`}
     Each quarter, the winning square is where the last digit of the ${esc(b.team1)} score (top) meets the last digit of the ${esc(b.team2)} score (side).
-    ${b.prizes ? "" : "The pot is split evenly across the four prizes."} Scores fill in automatically during the game, about a minute behind.
+    The pot is the first ${POT_SQUARES} squares taken; the last ${ADMIN_SQUARES} belong to the administrator and don't add to it. ${b.prizes ? "" : "The pot is split evenly across the four prizes."} Scores fill in automatically during the game, about a minute behind.
     ${admin && !b.top_digits ? " As administrator, tap a taken square to clear it, and press Draw numbers when the board is ready. Drawing locks the board." : ""}</p>`;
   return html;
 }
