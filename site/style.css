@@ -295,3 +295,4 @@ dialog p { margin: 4px 0; color: var(--text); }
 .payoff .po-d { flex: 1; border-bottom: 2px dotted var(--muted); transform: translateY(-4px); min-width: 16px; }
 .payoff .po-n { min-width: 2.4em; text-align: right; font-weight: 700; }
 .payoff .po-f { white-space: nowrap; }
+.payoff .po-min { text-align: center; font-size: 17px; font-weight: 800; margin: 0 0 8px; }
