@@ -130,10 +130,54 @@
   </form>
 </dialog>
 
+<dialog id="claim">
+  <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+  <form id="claim-form">
+    <h2>Take this square</h2>
+    <p class="sub" id="claim-title"></p>
+    <label class="field">Your name
+      <input id="claim-name" maxlength="40" autocomplete="nickname">
+    </label>
+    <p class="warn">Once your name is on a square, only the administrator can take it off.</p>
+    <p class="status" id="claim-status" role="status"></p>
+    <div class="dialog-actions"><button class="pick primary" id="claim-save" type="submit">Take square</button></div>
+  </form>
+</dialog>
+
+<dialog id="newboard">
+  <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+  <form id="newboard-form">
+    <h2>New board</h2>
+    <label class="field">Sport
+      <select id="nb-league"><option value="nfl">NFL</option><option value="college">College</option><option value="nba">NBA</option></select>
+    </label>
+    <label class="field">Game
+      <select id="nb-game"></select>
+    </label>
+    <label class="field">Board name (optional)
+      <input id="nb-title" maxlength="60">
+    </label>
+    <label class="field">Price per square (🪙)
+      <input id="nb-price" type="number" inputmode="numeric" min="0" max="100" step="1" value="1">
+    </label>
+    <p class="field">Prizes (🪙). Leave blank to split the pot evenly.</p>
+    <div class="prize-row">
+      <label>Q1<input class="nb-prize" type="number" inputmode="numeric" min="0" step="1"></label>
+      <label>Q2<input class="nb-prize" type="number" inputmode="numeric" min="0" step="1"></label>
+      <label>Q3<input class="nb-prize" type="number" inputmode="numeric" min="0" step="1"></label>
+      <label>Final<input class="nb-prize" type="number" inputmode="numeric" min="0" step="1"></label>
+    </div>
+    <p class="note">The home team goes across the top (Team 1) and the away team down the side (Team 2). Players can take squares until you draw the numbers or the game starts.</p>
+    <p class="status" id="nb-status" role="status"></p>
+    <div class="dialog-actions"><button class="pick primary" id="nb-save" type="submit">Make board</button></div>
+  </form>
+</dialog>
+
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
+<script src="boards.js"></script>
 </body>
 </html>

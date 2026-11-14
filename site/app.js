@@ -216,9 +216,6 @@ function renderWeek() {
   return html;
 }
 
-function renderBoards() {
-  return `<h1>Boards</h1><div class="empty">Coming soon.</div>`;
-}
 
 function renderResults() {
   const weeks = completedWeeks();
@@ -364,7 +361,7 @@ document.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.league) { state.league = b.dataset.league; state.week = null; state.allPicks = null; save("league", state.league); render(); loadLeague(state.league).then(() => { render(); loadMyTickets(); if (state.tab === "picks") loadAllPicks(); }); }
-  else if (b.dataset.tab) { state.tab = b.dataset.tab; save("tab", state.tab); render(); window.scrollTo({ top: 0 }); if (state.tab === "picks") loadAllPicks(); }
+  else if (b.dataset.tab) { state.tab = b.dataset.tab; save("tab", state.tab); render(); window.scrollTo({ top: 0 }); if (state.tab === "picks") loadAllPicks(); if (state.tab === "boards") loadBoards(); }
   else if (b.dataset.pick) setPick("side", b.dataset.id, b.dataset.pick);
   else if (b.dataset.total) setPick("total", b.dataset.id, b.dataset.total);
   else if (b.id === "about-btn") $("#about").showModal();
@@ -386,6 +383,7 @@ document.addEventListener("click", (e) => {
   else if (b.id === "deadline-clear") saveDeadline(null);
   else if (b.id === "picks-refresh") loadAllPicks();
   else if (b.id === "picks-csv") downloadPicks();
+  else boardClick(b);
 });
 document.addEventListener("change", (e) => {
   if (e.target.id === "week") { state.week = Number(e.target.value); render(); }
@@ -394,11 +392,15 @@ document.addEventListener("change", (e) => {
     const v = Math.max(1, Math.min(MAX_WAGER, Math.round(Number(e.target.value) || 1)));
     save("wager", v); render();
   }
+  if (e.target.id === "nb-league") fillBoardGames();
+  if (e.target.id === "nb-game") $("#nb-title").placeholder = boardGameTitle();
   if (e.target.id === "adj-fav") $("#adj-points-row").hidden = e.target.value === "pick";
 });
 document.addEventListener("submit", (e) => {
   if (e.target.id === "review-form") { e.preventDefault(); placeTicket(); }
   if (e.target.id === "signin-form") { e.preventDefault(); adminSignIn(); }
+  if (e.target.id === "claim-form") { e.preventDefault(); claimSquare(); }
+  if (e.target.id === "newboard-form") { e.preventDefault(); createBoard(); }
 });
 window.addEventListener("hashchange", () => { if (location.hash === "#admin") openAdmin(); });
 
@@ -810,6 +812,7 @@ function downloadPicks() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+
 function toast(text) {
   const t = $("#toast");
   t.textContent = text;
@@ -828,11 +831,13 @@ function toast(text) {
   render();
   loadMyTickets();
   if (state.tab === "picks") loadAllPicks();
+  if (state.tab === "boards") loadBoards();
   if (location.hash === "#admin") openAdmin();
   // Keep locks, the deadline and adjusted lines current while the page stays open.
   setInterval(async () => {
     if (document.querySelector("dialog[open]")) return;
     await loadShared().catch(() => {});
+    if (state.tab === "boards") await loadBoards(true);
     render();
   }, 60000);
 })();
