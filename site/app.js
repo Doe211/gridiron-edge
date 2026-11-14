@@ -216,6 +216,10 @@ function renderWeek() {
   return html;
 }
 
+function renderBoards() {
+  return `<h1>Boards</h1><div class="empty">Coming soon.</div>`;
+}
+
 function renderResults() {
   const weeks = completedWeeks();
   if (!weeks.length) return `<h1>Results</h1><div class="empty">No finished games yet this season.</div>`;
@@ -332,7 +336,7 @@ function render() {
   if (d.error) { main.innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
   let html = d.message ? `<div class="warn">${esc(d.message)}</div>` : "";
   if (state.tab === "picks" && !isAdmin()) state.tab = "week";
-  html += { week: renderWeek, tickets: renderMyTickets, results: renderResults, scorecard: renderScorecard, ratings: renderRatings, picks: renderAllPicks }[state.tab]();
+  html += { week: renderWeek, tickets: renderMyTickets, results: renderResults, boards: renderBoards, scorecard: renderScorecard, ratings: renderRatings, picks: renderAllPicks }[state.tab]();
   main.innerHTML = html;
   const updated = new Date(d.updated);
   $("#updated").textContent = `${LEAGUES[state.league]} data updated ${updated.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}.`;
@@ -817,7 +821,7 @@ function toast(text) {
 // ---------- start ----------
 (async function start() {
   if (!LEAGUES[state.league]) state.league = "nfl";
-  if (!["week", "tickets", "results", "picks"].includes(state.tab)) state.tab = "week";
+  if (!["week", "tickets", "results", "boards", "picks"].includes(state.tab)) state.tab = "week";
   render();
   try { await refreshSession(); } catch { /* the site still works without the database */ }
   await Promise.all([loadShared().catch(() => {}), loadLeague(state.league)]);
