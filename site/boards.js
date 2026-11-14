@@ -39,6 +39,13 @@ function playerColors(sq) {
   people.forEach((r, i) => colors.set(r.user_id, `hsl(${Math.round((i * 137.508) % 360)}, 75%, 80%)`));
   return { people, colors };
 }
+// A winning square: a pulsing football with the winner's name on it.
+const FOOTBALL_SVG = `<svg viewBox="0 0 100 60" aria-hidden="true"><path d="M3 30 C 25 -6, 75 -6, 97 30 C 75 66, 25 66, 3 30 Z" fill="#8a4a1f" stroke="#5c2f12" stroke-width="2"/>
+  <path d="M17 14 C 14 22, 14 38, 17 46 M83 14 C 86 22, 86 38, 83 46" stroke="#fff" stroke-width="3" fill="none"/>
+  <path d="M38 12 H62 M42 8 V16 M47 8 V16 M52 8 V16 M57 8 V16" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`;
+function winnerBall(row) {
+  return `<span class="ball">${FOOTBALL_SVG}<span class="ball-name${row && row.name.length > 9 ? " xlong" : row && row.name.length > 6 ? " long" : ""}">${row ? esc(row.name) : "Open"}</span></span><span class="win-tag">WINNER</span>`;
+}
 const boardById = (id) => (state.boards || []).find((b) => b.id === id);
 const taken = (b) => (state.squares[b.id] || new Map()).size;
 // The first 80 squares taken fill the pot. Squares 81-100 are the administrator's 20, sold for themselves.
@@ -116,7 +123,7 @@ function renderBoard(b) {
           const cls = ["sq-sq", row ? "taken" : "open", !tint && row && row.user_id === me ? "mine" : "", wins ? "winner" : "", tint ? "tinted" : ""].join(" ");
           const canAct = (!row && !boardClosed(b)) || (row && admin && !b.top_digits);
           return `<button class="${cls}" ${tint ? `style="background:${tint}"` : ""} ${canAct ? `data-square="${i}"` : "disabled"} title="${row ? esc(playerTag(row)) : `Square ${i + 1}`}">
-            ${wins ? `<em>${wins.join(" ")}</em>` : ""}<span class="nm">${row ? esc(row.name) : ""}${row?.player_no ? `<b class="pn">#${row.player_no}</b>` : ""}</span><small>${i + 1}</small></button>`;
+            ${wins ? `<em>${wins.join(" ")}</em>${winnerBall(row)}` : `<span class="nm">${row ? esc(row.name) : ""}${row?.player_no ? `<b class="pn">#${row.player_no}</b>` : ""}</span>`}<small>${i + 1}</small></button>`;
         }).join("")).join("")}
       </div></div>
     </div>
