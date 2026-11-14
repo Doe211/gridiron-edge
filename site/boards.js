@@ -32,6 +32,13 @@ async function loadBoards(quiet = false) {
 }
 
 const playerTag = (row) => (row ? `${row.name}${row.player_no ? " #" + row.player_no : ""}` : "");
+// Administrator only: a different light color for each player on a board, so their squares stand out.
+function playerColors(sq) {
+  const people = [...new Map([...sq.values()].sort((a, b) => (a.player_no ?? 0) - (b.player_no ?? 0)).map((r) => [r.user_id, r])).values()];
+  const colors = new Map();
+  people.forEach((r, i) => colors.set(r.user_id, `hsl(${Math.round((i * 137.508) % 360)}, 75%, 80%)`));
+  return { people, colors };
+}
 const boardById = (id) => (state.boards || []).find((b) => b.id === id);
 const taken = (b) => (state.squares[b.id] || new Map()).size;
 // The first 80 squares taken fill the pot. Squares 81-100 are the administrator's 20, sold for themselves.
@@ -72,6 +79,7 @@ function renderBoards() {
 
 function renderBoard(b) {
   const admin = isAdmin(), sq = state.squares[b.id] || new Map(), sc = b.scores;
+  const palette = admin ? playerColors(sq) : null;
   const me = session?.user?.id;
   const winners = new Map();   // square -> list of quarter labels
   const quarterRows = QUARTERS.map((label, q) => {
@@ -104,14 +112,20 @@ function renderBoard(b) {
         <span class="sq-corner"></span>${[...Array(10)].map((_, c) => `<span class="sq-dh">${digit(b.top_digits, c)}</span>`).join("")}
         ${[...Array(10)].map((_, r) => `<span class="sq-dh side">${digit(b.side_digits, r)}</span>` + [...Array(10)].map((_, c) => {
           const i = r * 10 + c, row = sq.get(i), wins = winners.get(i);
-          const cls = ["sq-sq", row ? "taken" : "open", row && row.user_id === me ? "mine" : "", wins ? "winner" : ""].join(" ");
+          const tint = admin && row ? palette.colors.get(row.user_id) : null;
+          const cls = ["sq-sq", row ? "taken" : "open", !tint && row && row.user_id === me ? "mine" : "", wins ? "winner" : "", tint ? "tinted" : ""].join(" ");
           const canAct = (!row && !boardClosed(b)) || (row && admin && !b.top_digits);
-          return `<button class="${cls}" ${canAct ? `data-square="${i}"` : "disabled"} title="${row ? esc(playerTag(row)) : `Square ${i + 1}`}">
+          return `<button class="${cls}" ${tint ? `style="background:${tint}"` : ""} ${canAct ? `data-square="${i}"` : "disabled"} title="${row ? esc(playerTag(row)) : `Square ${i + 1}`}">
             ${wins ? `<em>${wins.join(" ")}</em>` : ""}<span class="nm">${row ? esc(row.name) : ""}${row?.player_no ? `<b class="pn">#${row.player_no}</b>` : ""}</span><small>${i + 1}</small></button>`;
         }).join("")).join("")}
       </div></div>
     </div>
   </section>`;
+  if (admin && palette.people.length) {
+    const count = (u) => [...sq.values()].filter((r) => r.user_id === u).length;
+    html += `<div class="sq-legend"><b>Players (only you see the colors):</b> ${palette.people.map((r) =>
+      `<span class="chip"><i style="background:${palette.colors.get(r.user_id)}"></i>${esc(playerTag(r))} · ${count(r.user_id)}</span>`).join("")}</div>`;
+  }
   const open = 100 - sq.size;
   html += `<p class="note">${boardClosed(b)
     ? (b.top_digits ? "The numbers are drawn, so this board is locked." : "The game has started, so this board is closed.")
