@@ -88,7 +88,7 @@ function renderBoard(b) {
     <div class="sq-top">
       <div class="sq-brand"><div class="sq-title">${esc(b.title)}</div><div class="sq-kind">FOOTBALL SQUARES</div>
         <div class="sq-money"><span>PRICE PER SQUARE</span><b>${coins(b.price)}</b><span>TOTAL POT</span><b>${coins(pot(b))} <small>(${potSquares(b)} of ${POT_SQUARES})</small></b></div>
-        ${adminSold(b) ? `<div class="sq-admin">Admin squares sold: ${adminSold(b)} of ${ADMIN_SQUARES}</div>` : ""}
+        ${admin && adminSold(b) ? `<div class="sq-admin">Admin squares sold: ${adminSold(b)} of ${ADMIN_SQUARES}</div>` : ""}
         ${sc?.live ? `<div class="sq-live">LIVE · ${esc(b.team1)} ${sc.now[0]}, ${esc(b.team2)} ${sc.now[1]} · ${esc(sc.clock)}</div>` : ""}</div>
       <div class="sq-table">
         <span></span>${QUARTERS.map((q) => `<span class="sq-qh">${q}</span>`).join("")}
