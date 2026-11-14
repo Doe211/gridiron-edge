@@ -283,3 +283,4 @@ dialog p { margin: 4px 0; color: var(--text); }
   .sq-team1 span, .sq-team2 span { font-size: 16px; }
   .sq-team2 { width: 32px; }
 }
+.sq-sq .pn { display: block; font-size: 10px; font-weight: 700; color: #8a3a12; }

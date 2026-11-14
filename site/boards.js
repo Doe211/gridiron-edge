@@ -23,7 +23,7 @@ async function loadBoards(quiet = false) {
   if (error) { if (!quiet) { state.boardsStatus = "Couldn't load the boards. Check your connection."; render(); } return; }
   state.boardsStatus = "";
   state.boards = data;
-  const { data: sq } = await db.from("board_squares").select("board_id,square,name,user_id").in("board_id", data.map((b) => b.id));
+  const { data: sq } = await db.from("board_squares").select("board_id,square,name,user_id,player_no").in("board_id", data.map((b) => b.id));
   state.squares = {};
   for (const b of data) state.squares[b.id] = new Map();
   for (const r of sq || []) state.squares[r.board_id]?.set(r.square, r);
@@ -31,6 +31,7 @@ async function loadBoards(quiet = false) {
   render();
 }
 
+const playerTag = (row) => (row ? `${row.name}${row.player_no ? " #" + row.player_no : ""}` : "");
 const boardById = (id) => (state.boards || []).find((b) => b.id === id);
 const taken = (b) => (state.squares[b.id] || new Map()).size;
 const pot = (b) => b.price * taken(b);
@@ -72,7 +73,7 @@ function renderBoard(b) {
   const quarterRows = QUARTERS.map((label, q) => {
     const score = sc?.quarters?.[q] || null, w = winnerSquare(b, score);
     if (w != null) winners.set(w, [...(winners.get(w) || []), label]);
-    const who = w == null ? "" : sq.get(w)?.name || "Open square";
+    const who = w == null ? "" : playerTag(sq.get(w)) || "Open square";
     return { label, score, w, who, prize: prizeFor(b, q) };
   });
   const digit = (arr, i) => (arr ? arr[i] : "");
@@ -88,7 +89,7 @@ function renderBoard(b) {
         <span></span>${QUARTERS.map((q) => `<span class="sq-qh">${q}</span>`).join("")}
         <span class="sq-rh">SCORE</span>${quarterRows.map((r) => `<span class="sq-cell">${r.score ? `<i>${r.score[0]}</i><i>${r.score[1]}</i>` : `<i></i><i></i>`}</span>`).join("")}
         <span class="sq-rh">PRIZE</span>${quarterRows.map((r) => `<span class="sq-cell">${coins(r.prize)}</span>`).join("")}
-        <span class="sq-rh">WINNER</span>${quarterRows.map((r) => `<span class="sq-cell win">${r.w == null ? "" : `#${r.w + 1} ${esc(r.who)}`}</span>`).join("")}
+        <span class="sq-rh">WINNER</span>${quarterRows.map((r) => `<span class="sq-cell win">${r.w == null ? "" : `Sq ${r.w + 1}: ${esc(r.who)}`}</span>`).join("")}
       </div>
     </div>
     <div class="sq-team1"><span>TEAM 1</span><b>${esc(b.team1)}</b></div>
@@ -100,8 +101,8 @@ function renderBoard(b) {
           const i = r * 10 + c, row = sq.get(i), wins = winners.get(i);
           const cls = ["sq-sq", row ? "taken" : "open", row && row.user_id === me ? "mine" : "", wins ? "winner" : ""].join(" ");
           const canAct = (!row && !boardClosed(b)) || (row && admin && !b.top_digits);
-          return `<button class="${cls}" ${canAct ? `data-square="${i}"` : "disabled"} title="${row ? esc(row.name) : `Square ${i + 1}`}">
-            ${wins ? `<em>${wins.join(" ")}</em>` : ""}<span class="nm">${row ? esc(row.name) : ""}</span><small>${i + 1}</small></button>`;
+          return `<button class="${cls}" ${canAct ? `data-square="${i}"` : "disabled"} title="${row ? esc(playerTag(row)) : `Square ${i + 1}`}">
+            ${wins ? `<em>${wins.join(" ")}</em>` : ""}<span class="nm">${row ? esc(row.name) : ""}${row?.player_no ? `<b class="pn">#${row.player_no}</b>` : ""}</span><small>${i + 1}</small></button>`;
         }).join("")).join("")}
       </div></div>
     </div>
@@ -143,10 +144,10 @@ async function claimSquare() {
   $("#claim-status").textContent = "Saving…";
   try {
     await ensureSession();
-    const { error } = await db.rpc("claim_square", { p_board: claiming.board, p_square: claiming.square, p_name: name });
+    const { data, error } = await db.rpc("claim_square", { p_board: claiming.board, p_square: claiming.square, p_name: name });
     if (error) throw error;
     $("#claim").close();
-    toast(`Square ${claiming.square + 1} is yours.`);
+    toast(`Square ${claiming.square + 1} is yours, ${name} #${data}.`);
   } catch (err) {
     const msg = String(err?.message || "");
     $("#claim-status").textContent = /already|closed|drawn|started|exists/.test(msg) ? msg : "Couldn't save your square. Check your connection and try again.";
