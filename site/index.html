@@ -75,7 +75,7 @@
 
 <dialog id="adjust">
   <form method="dialog"><button class="close" aria-label="Close">×</button></form>
-  <h2>Adjust line</h2>
+  <h2>Set line</h2>
   <p class="sub" id="adj-title"></p>
   <label class="field">Spread
     <select id="adj-fav"></select>
@@ -92,7 +92,8 @@
   </div>
   <p class="status" id="adj-status" role="status"></p>
   <div class="dialog-actions">
-    <button class="pick" id="adj-vegas">Use the Vegas lines</button>
+    <button class="pick danger" id="adj-remove">Remove line</button>
+    <button class="pick" id="adj-vegas">Fill in Vegas lines</button>
     <button class="pick primary" id="adj-save">Save</button>
   </div>
 </dialog>
@@ -113,7 +114,7 @@
     </form>
   </div>
   <div id="admin-connected" hidden>
-    <p>You're signed in as the administrator. The <b>All Picks</b> tab shows who picked what, and each upcoming game has an <b>Adjust line</b> button.</p>
+    <p>You're signed in as the administrator. The <b>All Tickets</b> tab shows every ticket. Players see no lines until you set them: each upcoming game has a <b>✎ Set line</b> button, and nothing reaches players until you press <b>Publish lines</b> on This Week.</p>
     <h3>Pick deadline</h3>
     <p class="note" id="deadline-now"></p>
     <label class="field">Close all picks at
@@ -125,7 +126,7 @@
       <button class="pick primary" id="deadline-save">Save deadline</button>
     </div>
     <p class="status" id="deadline-status" role="status"></p>
-    <h3>Adjusted lines</h3>
+    <h3>Your lines</h3>
     <div class="table" id="admin-list"></div>
     <div class="dialog-actions"><button class="pick" id="admin-signout">Sign out on this device</button></div>
   </div>
