@@ -56,14 +56,11 @@ begin
             brk := coalesce(st->'type'->>'name', '') ~ 'END_PERIOD|HALFTIME';
             qs := '[]'::jsonb;
             for q in 0..3 loop
-              done := case when q = 3 then fin else fin or period > q + 1 or (period = q + 1 and brk) end;
+              -- No overtime payouts: Final is the score at the end of the 4th quarter.
+              done := fin or period > q + 1 or (period = q + 1 and brk);
               if not done then qs := qs || jsonb_build_array(null); continue; end if;
-              if q = 3 then
-                s1 := (c1->>'score')::numeric::int; s2 := (c2->>'score')::numeric::int;
-              else
-                s1 := (select coalesce(sum((l->>'value')::numeric), 0)::int from jsonb_array_elements(c1->'linescores') with ordinality t(l, n) where n <= q + 1);
-                s2 := (select coalesce(sum((l->>'value')::numeric), 0)::int from jsonb_array_elements(c2->'linescores') with ordinality t(l, n) where n <= q + 1);
-              end if;
+              s1 := (select coalesce(sum((l->>'value')::numeric), 0)::int from jsonb_array_elements(c1->'linescores') with ordinality t(l, n) where n <= q + 1);
+              s2 := (select coalesce(sum((l->>'value')::numeric), 0)::int from jsonb_array_elements(c2->'linescores') with ordinality t(l, n) where n <= q + 1);
               qs := qs || jsonb_build_array(jsonb_build_array(s1, s2));
             end loop;
             update boards set scores = jsonb_build_object(

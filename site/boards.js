@@ -138,7 +138,7 @@ function renderBoard(b) {
     ? (b.top_digits ? "The numbers are drawn, so this board is locked." : "The game has started, so this board is closed.")
     : `Tap an open square to put your name on it. ${open} of 100 squares are open.`}
     Each quarter, the winning square is where the last digit of the ${esc(b.team1)} score (top) meets the last digit of the ${esc(b.team2)} score (side).
-    ${admin ? `The pot is the first ${POT_SQUARES} squares taken; the last ${ADMIN_SQUARES} are yours and don't add to it. ` : ""}${b.prizes ? "" : "The pot is split evenly across the four prizes."} Scores fill in automatically during the game, about a minute behind.
+    ${admin ? `The pot is the first ${POT_SQUARES} squares taken; the last ${ADMIN_SQUARES} are yours and don't add to it. ` : ""}${b.prizes ? "" : "The pot is split evenly across the four prizes."} Final is the score at the end of the 4th quarter; overtime doesn't count. Scores fill in automatically during the game, about a minute behind.
     ${admin && !b.top_digits ? " As administrator, tap a taken square to clear it, and press Draw numbers when the board is ready. Drawing locks the board." : ""}</p>`;
   return html;
 }
