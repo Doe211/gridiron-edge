@@ -12,7 +12,8 @@ const state = {
   tab: load("tab", "week"),
   week: null,
   data: {},
-  overrides: {},
+  published: {},   // lines everyone sees (published by the administrator)
+  drafts: {},      // the administrator's working lines (administrator only)
   settings: {}, // administrator settings, e.g. { picks_close: "2026-11-15T18:00:00Z" }
   myTickets: {}, // league -> tickets placed from this device
   myLegs: {},    // league -> { picks: {game: side}, totals: {game: over/under} } from those tickets
@@ -117,27 +118,34 @@ function totalWon(g, side) {
 const ouLabel = (s) => (s === "over" ? "Over" : "Under");
 
 // ---------- the league's games ----------
+/** Players see only the lines the administrator published. The administrator sees their own
+ *  working lines, with the live Vegas lines alongside. Vegas lines stay on vegas_spread/vegas_total. */
 function applyOverrides(games) {
+  const admin = isAdmin();
   return games.map((g) => {
-    const o = state.overrides[g.id];
-    if (!o) return g;
-    const c = { ...g, adjusted: true, vegas_spread: g.spread, vegas_total: g.total };
-    if (o.spread != null) c.spread = o.spread;
-    if (o.total != null) c.total = o.total;
-    return c;
+    const pub = state.published[g.id] || null, dr = state.drafts[g.id] || null;
+    const line = admin ? dr : pub;
+    return { ...g, vegas_spread: g.spread, vegas_total: g.total, spread: line?.spread ?? null, total: line?.total ?? null, pub, draft: dr };
   });
 }
-const scored = (games) => games.filter((g) => isFinal(g) && (state.league !== "college" || g.spread != null));
+const sameLine = (a, b) => (a?.spread ?? null) === (b?.spread ?? null) && (a?.total ?? null) === (b?.total ?? null);
+/** Administrator: games whose working line differs from what players see. */
+function unpublishedIds() {
+  const ids = new Set([...Object.keys(state.drafts), ...Object.keys(state.published)]);
+  return [...ids].filter((id) => !sameLine(state.drafts[id], state.published[id]));
+}
+const hasVegas = (g) => (g.vegas_spread !== undefined ? g.vegas_spread : g.spread) != null;
+const scored = (games) => games.filter((g) => isFinal(g) && (state.league !== "college" || hasVegas(g)));
 const seasonGames = () => D().games.filter((g) => g.season === D().current_season);
 const pickMode = () => D().pick_mode;
 
 function upcomingWeek() {
-  const weeks = seasonGames().filter((g) => !isFinal(g) && (g.spread != null || state.league !== "college")).map((g) => g.week);
+  const weeks = seasonGames().filter((g) => !isFinal(g) && (hasVegas(g) || state.league !== "college")).map((g) => g.week);
   return weeks.length ? Math.min(...weeks) : null;
 }
 function upcomingGames() {
   const w = upcomingWeek(); if (w == null) return [];
-  return seasonGames().filter((g) => g.week === w && !isFinal(g) && (state.league !== "college" || g.spread != null))
+  return seasonGames().filter((g) => g.week === w && !isFinal(g) && (state.league !== "college" || hasVegas(g)))
     .sort((a, b) => (a.kickoff || "").localeCompare(b.kickoff || "") || a.id.localeCompare(b.id));
 }
 const completedWeeks = () => [...new Set(seasonGames().filter(isFinal).map((g) => g.week))].sort((a, b) => b - a);
@@ -183,7 +191,7 @@ function when(g) {
 
 function gameCard(g) {
   const locked = isLocked(g), mine = draft("picks")[g.id], myTotal = draft("totals")[g.id];
-  const teamBtn = (side) => `<button class="team-pick" data-pick="${side}" data-id="${esc(g.id)}" aria-pressed="${mine === side}" ${locked ? "disabled" : ""}>
+  const teamBtn = (side) => `<button class="team-pick" data-pick="${side}" data-id="${esc(g.id)}" aria-pressed="${mine === side}" ${locked || g.spread == null ? "disabled" : ""}>
       <span class="tp-name">${esc(fullName(team(g, side)))}</span>
       <span class="tp-line">${g.spread != null ? esc(lineFor(g, side)) : ""}</span>
     </button>`;
@@ -194,11 +202,22 @@ function gameCard(g) {
     <div class="lines">
       <span><span class="label">Spread</span> ${esc(g.spread != null ? lineText(g) : "No line yet")}</span>
       <span><span class="label">Over/under</span> ${g.total != null ? pts(g.total) : "No line yet"}</span>
-      ${g.adjusted ? '<span class="adjusted">✎ Adjusted</span>' : ""}
+      ${isAdmin() ? lineStatus(g) : ""}
     </div>
+    ${isAdmin() ? `<div class="vegas-ref">Live Vegas (only you see this): spread ${esc(g.vegas_spread != null ? lineText({ ...g, spread: g.vegas_spread }) : "none")} · O/U ${g.vegas_total != null ? pts(g.vegas_total) : "none"}</div>` : ""}
     ${g.total != null ? `<div class="picks"><span class="lbl">Total:</span>${ouBtn("over")}${ouBtn("under")}</div>` : ""}
-    ${isAdmin() && !isFinal(g) ? `<div class="picks"><button class="admin-btn" data-adjust="${esc(g.id)}">✎ Adjust line</button></div>` : ""}
+    ${isAdmin() && !isFinal(g) ? `<div class="picks"><button class="admin-btn" data-adjust="${esc(g.id)}">✎ Set line</button></div>` : ""}
   </article>`;
+}
+
+function lineStatus(g) {
+  if (sameLine(g.draft, g.pub)) return g.pub ? '<span class="line-status ok">✓ Published</span>' : "";
+  return g.draft ? '<span class="line-status draft">✎ Not published yet</span>' : '<span class="line-status draft">✎ Removal not published yet</span>';
+}
+function publishBar() {
+  const n = unpublishedIds().length;
+  return `<div class="publish-bar ${n ? "pending" : ""}"><span>${n ? `${n} line change${n === 1 ? "" : "s"} not published yet. Players don't see ${n === 1 ? "it" : "them"} until you publish.` : "All your lines are published. Players see exactly what you see under Spread and Over/under."}</span>
+    <button class="pick primary" id="publish-lines" ${n ? "" : "disabled"}>Publish lines</button></div>`;
 }
 
 function renderWeek() {
@@ -210,6 +229,8 @@ function renderWeek() {
     const t = dl.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     html += picksClosed() ? `<div class="deadline closed">🔒 Picks are closed.</div>` : `<div class="deadline">⏰ Picks close ${esc(t)}</div>`;
   }
+  if (isAdmin()) html += publishBar();
+  else if (!games.some((g) => g.spread != null || g.total != null)) html += `<div class="deadline">Lines aren't posted yet for these games. Check back soon.</div>`;
   html += `<p class="note">Build a ticket: tap ${MIN_LEGS} to ${MAX_LEGS} picks (teams against the spread and Over/Under totals), choose your wager, and place it. Every pick must win (a 10-pick ticket also pays for 9 of 10 or 0 of 10). Once placed, a ticket can't be changed.</p>`;
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
   html += ticketBar();
@@ -221,7 +242,7 @@ function renderResults() {
   const weeks = completedWeeks();
   if (!weeks.length) return `<h1>Results</h1><div class="empty">No finished games yet this season.</div>`;
   const w = weeks.includes(state.week) ? state.week : weeks[0];
-  const games = seasonGames().filter((g) => g.week === w && isFinal(g) && (state.league !== "college" || g.spread != null))
+  const games = seasonGames().filter((g) => g.week === w && isFinal(g) && (state.league !== "college" || hasVegas(g)))
     .sort((a, b) => (a.kickoff || "").localeCompare(b.kickoff || ""));
   let html = `<h1>${esc(weekLabel(w))} Results</h1>
     <div class="toolbar"><label for="week">Week:</label><select id="week">${weeks.map((x) => `<option value="${x}" ${x === w ? "selected" : ""}>${esc(weekLabel(x))}</option>`).join("")}</select></div>
@@ -373,6 +394,8 @@ document.addEventListener("click", (e) => {
   else if (b.dataset.removeAdj) saveLine(b.dataset.removeAdj, null).then(renderAdminList);
   else if (b.id === "adj-save") submitAdjust(false);
   else if (b.id === "adj-vegas") submitAdjust(true);
+  else if (b.id === "adj-remove") { saveLine(adjusting.id, null).then((ok) => ok && $("#adjust").close()); }
+  else if (b.id === "publish-lines") publishLines();
   else if (b.id === "admin-signout") adminSignOut();
   else if (b.id === "deadline-save") {
     const v = $("#deadline").value;
@@ -394,7 +417,7 @@ document.addEventListener("change", (e) => {
   }
   if (e.target.id === "nb-league") fillBoardGames();
   if (e.target.id === "nb-game") $("#nb-title").placeholder = boardGameTitle();
-  if (e.target.id === "adj-fav") $("#adj-points-row").hidden = e.target.value === "pick";
+  if (e.target.id === "adj-fav") $("#adj-points-row").hidden = e.target.value === "pick" || e.target.value === "none";
 });
 document.addEventListener("submit", (e) => {
   if (e.target.id === "review-form") { e.preventDefault(); placeTicket(); }
@@ -424,14 +447,22 @@ async function refreshSession() {
 
 async function loadShared() {
   if (!db) {
-    try { state.overrides = await fetchJSON("lines.json"); } catch { state.overrides = {}; }
+    state.published = {};
     try { state.settings = await fetchJSON("settings.json"); } catch { state.settings = {}; }
     return;
   }
-  const [lines, settings] = await Promise.all([db.from("lines").select("game_id,spread,total"), db.from("settings").select("key,value")]);
-  const o = {};
-  for (const l of lines.data || []) o[l.game_id] = { spread: l.spread == null ? null : Number(l.spread), total: l.total == null ? null : Number(l.total) };
-  state.overrides = o;
+  const toLines = (rows) => {
+    const o = {};
+    for (const l of rows || []) o[l.game_id] = { spread: l.spread == null ? null : Number(l.spread), total: l.total == null ? null : Number(l.total) };
+    return o;
+  };
+  const [pub, settings, drafts] = await Promise.all([
+    db.from("published_lines").select("game_id,spread,total"),
+    db.from("settings").select("key,value"),
+    isAdmin() ? db.from("lines").select("game_id,spread,total") : Promise.resolve({ data: [] }),
+  ]);
+  if (!pub.error) state.published = toLines(pub.data);
+  if (!drafts.error) state.drafts = isAdmin() ? toLines(drafts.data) : {};
   const st = {};
   for (const x of settings.data || []) st[x.key] = x.value;
   state.settings = st;
@@ -623,6 +654,7 @@ async function adminSignIn() {
   if (!isAdmin()) { $("#admin-status").textContent = "Signed in, but this account isn't the administrator."; return; }
   $("#admin-password").value = "";
   $("#admin-status").textContent = "";
+  await loadShared().catch(() => {});
   openAdmin();
   await loadMyTickets();
   render();
@@ -631,19 +663,22 @@ async function adminSignIn() {
 async function adminSignOut() {
   await db.auth.signOut();
   session = null; adminFlag = false;
+  state.drafts = {};
+  await loadShared().catch(() => {});
   $("#admin").close();
   if (state.tab === "picks") state.tab = "week";
   render();
 }
 
 function renderAdminList() {
-  const ids = Object.keys(state.overrides);
+  const ids = [...new Set([...Object.keys(state.drafts), ...Object.keys(state.published)])];
   const all = Object.values(state.data).flatMap((d) => d.raw || []);
+  const describe = (g, o) => !o ? "no line" : [o.spread != null ? `spread ${o.spread === 0 ? "pick'em" : o.spread > 0 ? `${g ? g.home : "home"} -${pts(o.spread)}` : `${g ? g.away : "away"} -${pts(-o.spread)}`}` : "", o.total != null ? `O/U ${pts(o.total)}` : ""].filter(Boolean).join(", ");
   $("#admin-list").innerHTML = ids.length ? ids.map((id) => {
-    const g = all.find((x) => x.id === id), o = state.overrides[id];
-    const what = [o.spread != null ? `spread ${o.spread === 0 ? "pick'em" : o.spread > 0 ? `${g ? g.home : "home"} -${pts(o.spread)}` : `${g ? g.away : "away"} -${pts(-o.spread)}`}` : "", o.total != null ? `total ${pts(o.total)}` : ""].filter(Boolean).join(", ");
-    return `<div class="row"><span class="t">${g ? `${esc(g.away)} at ${esc(g.home)}` : esc(id)}<br><span class="r">${esc(what)}</span></span><button class="pick" data-remove-adj="${esc(id)}">Undo</button></div>`;
-  }).join("") : `<div class="row"><span class="t r">No adjusted lines right now.</span></div>`;
+    const g = all.find((x) => x.id === id), d = state.drafts[id], p = state.published[id];
+    const status = sameLine(d, p) ? "published" : `not published (players see: ${describe(g, p)})`;
+    return `<div class="row"><span class="t">${g ? `${esc(g.away)} at ${esc(g.home)}` : esc(id)}<br><span class="r">${esc(describe(g, d))} · ${esc(status)}</span></span>${d ? `<button class="pick" data-remove-adj="${esc(id)}">Remove</button>` : ""}</div>`;
+  }).join("") : `<div class="row"><span class="t r">No lines yet. Use ✎ Set line on a game.</span></div>`;
 }
 
 let adjusting = null;
@@ -651,50 +686,63 @@ function openAdjust(id) {
   const g = D().games.find((x) => x.id === id);
   if (!g) return;
   adjusting = g;
-  const vs = g.adjusted ? g.vegas_spread : g.spread, vt = g.adjusted ? g.vegas_total : g.total;
   $("#adj-title").textContent = `${fullName(g.away)} at ${fullName(g.home)}`;
-  $("#adj-fav").innerHTML = `<option value="away">${esc(g.away)} favored</option><option value="home">${esc(g.home)} favored</option><option value="pick">Pick'em</option>`;
-  $("#adj-fav").value = g.spread == null ? "home" : g.spread > 0 ? "home" : g.spread < 0 ? "away" : "pick";
-  $("#adj-points").value = g.spread ? pts(Math.abs(g.spread)) : "";
-  $("#adj-points-row").hidden = $("#adj-fav").value === "pick";
-  $("#adj-vegas-spread").textContent = `Vegas: ${vs == null ? "no line" : lineText({ ...g, spread: vs })}`;
+  $("#adj-fav").innerHTML = `<option value="none">No spread</option><option value="away">${esc(g.away)} favored</option><option value="home">${esc(g.home)} favored</option><option value="pick">Pick'em</option>`;
+  fillAdjust(g.spread, g.total);
+  $("#adj-vegas-spread").textContent = `Live Vegas: ${g.vegas_spread == null ? "no line" : lineText({ ...g, spread: g.vegas_spread })}`;
   $("#adj-total-row").hidden = false;
-  $("#adj-total").value = g.total != null ? pts(g.total) : "";
-  $("#adj-vegas-total").textContent = `Vegas: ${vt == null ? "no line" : pts(vt)}`;
+  $("#adj-vegas-total").textContent = `Live Vegas: ${g.vegas_total == null ? "no line" : pts(g.vegas_total)}`;
   $("#adj-status").textContent = "";
+  $("#adj-remove").hidden = !g.draft;
   $("#adjust").showModal();
+}
+function fillAdjust(spread, total) {
+  $("#adj-fav").value = spread == null ? "none" : spread > 0 ? "home" : spread < 0 ? "away" : "pick";
+  $("#adj-points").value = spread ? pts(Math.abs(spread)) : "";
+  $("#adj-points-row").hidden = $("#adj-fav").value === "pick" || $("#adj-fav").value === "none";
+  $("#adj-total").value = total != null ? pts(total) : "";
 }
 
 async function submitAdjust(useVegas) {
   const g = adjusting;
-  const vs = g.adjusted ? g.vegas_spread : g.spread, vt = g.adjusted ? g.vegas_total : g.total;
-  let entry = null;
-  if (!useVegas) {
-    const fav = $("#adj-fav").value, p = parseFloat($("#adj-points").value);
-    if (fav !== "pick" && !(p >= 0)) { $("#adj-status").textContent = "Enter the points, like 3.5."; return; }
-    const spread = fav === "pick" ? 0 : fav === "home" ? Math.abs(p) : -Math.abs(p);
-    entry = {};
-    if (spread !== vs) entry.spread = spread;
-    const t = parseFloat($("#adj-total").value);
-    if (t > 0 && t !== vt) entry.total = t;
-    if (!Object.keys(entry).length) entry = null;
+  if (useVegas) { fillAdjust(g.vegas_spread, g.vegas_total); $("#adj-status").textContent = "Vegas lines filled in. Change them if you like, then Save."; return; }
+  const fav = $("#adj-fav").value, p = parseFloat($("#adj-points").value);
+  let spread = null;
+  if (fav === "pick") spread = 0;
+  else if (fav !== "none") {
+    if (!(p >= 0)) { $("#adj-status").textContent = "Enter the points, like 3.5."; return; }
+    spread = fav === "home" ? Math.abs(p) : -Math.abs(p);
   }
+  const tv = $("#adj-total").value.trim(), t = parseFloat(tv);
+  if (tv && !(t > 0)) { $("#adj-status").textContent = "Enter the over/under, like 45.5, or leave it blank."; return; }
+  const total = tv ? t : null;
   $("#adj-status").textContent = "Saving…";
-  if (await saveLine(g.id, entry)) $("#adjust").close();
+  if (await saveLine(g.id, spread == null && total == null ? null : { spread, total })) $("#adjust").close();
 }
 
 async function saveLine(id, entry) {
   const setStatus = (t) => { ($("#adjust").open ? $("#adj-status") : $("#admin-status")).textContent = t; };
   const res = entry
-    ? await db.from("lines").upsert({ game_id: id, spread: entry.spread ?? null, total: entry.total ?? null, updated_at: new Date().toISOString() })
+    ? await db.from("lines").upsert({ game_id: id, spread: entry.spread, total: entry.total, updated_at: new Date().toISOString() })
     : await db.from("lines").delete().eq("game_id", id);
   if (res.error) { setStatus("Couldn't save. Check your connection and try again."); return false; }
-  if (entry) state.overrides[id] = entry; else delete state.overrides[id];
+  if (entry) state.drafts[id] = entry; else delete state.drafts[id];
   for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
   setStatus("");
   render();
-  toast("Saved. Everyone sees the new line right away.");
+  if ($("#admin").open) renderAdminList();
+  toast("Saved. Players won't see it until you press Publish lines.");
   return true;
+}
+
+async function publishLines() {
+  const b = $("#publish-lines");
+  if (b) b.disabled = true;
+  const { error } = await db.rpc("publish_lines");
+  if (error) { toast("Couldn't publish. Check your connection and try again."); if (b) b.disabled = false; return; }
+  await loadShared();
+  render();
+  toast("Published. Everyone sees your lines now.");
 }
 
 /** Sets (or with null, removes) the time when all picks close. */
