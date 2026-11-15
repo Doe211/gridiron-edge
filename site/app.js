@@ -230,6 +230,7 @@ function renderWeek() {
     html += picksClosed() ? `<div class="deadline closed">🔒 Picks are closed.</div>` : `<div class="deadline">⏰ Picks close ${esc(t)}</div>`;
   }
   if (isAdmin()) html += publishBar();
+  else if (!games.some((g) => g.spread != null || g.total != null)) html += `<div class="deadline">Lines aren't posted yet for these games. Check back soon.</div>`;
   html += `<p class="note">Build a ticket: tap ${MIN_LEGS} to ${MAX_LEGS} picks (teams against the spread and Over/Under totals), choose your wager, and place it. Every pick must win (a 10-pick ticket also pays for 9 of 10 or 0 of 10). Once placed, a ticket can't be changed.</p>`;
   html += `<div class="cards">${games.map(gameCard).join("")}</div>`;
   html += ticketBar();
