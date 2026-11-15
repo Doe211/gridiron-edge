@@ -54,7 +54,7 @@ begin
   -- 2. Ask for fresh copies (they arrive in the background for next time).
   foreach lg in array array['nfl', 'college', 'nba', 'mlb'] loop
     insert into games_sync (request_id, league)
-    values (net.http_get('https://doe211.github.io/gridiron-edge/data/' || lg || '.json?t=' || extract(epoch from now())::bigint,
+    values (net.http_get('https://falcon-picks.github.io/gridiron-edge/data/' || lg || '.json?t=' || extract(epoch from now())::bigint,
                          timeout_milliseconds := 30000), lg);
   end loop;
 end;

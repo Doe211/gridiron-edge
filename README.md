@@ -3,11 +3,11 @@
 Model predictions for NFL, college football, NBA and MLB games, compared with the Vegas lines.
 Visitors make their own picks and see how they do against the model.
 
-**Website:** https://doe211.github.io/gridiron-edge/
+**Website:** https://falcon-picks.github.io/gridiron-edge/
 
 ## Adjusting a line (administrator)
 
-**Easiest:** open https://doe211.github.io/gridiron-edge/#admin, connect your admin key once,
+**Easiest:** open https://falcon-picks.github.io/gridiron-edge/#admin, connect your admin key once,
 then tap **Adjust line** on any upcoming game.
 
 **Or by hand:** open `site/lines.json` on GitHub, click the pencil icon, edit, and click **Commit changes**.
@@ -25,7 +25,7 @@ Leave out either one to keep the Vegas number.
 ```
 
 To undo an adjustment, delete its line. To find a game's ID, open the game list for that
-league at `https://doe211.github.io/gridiron-edge/data/<league>.json` (nfl, college, nba or mlb).
+league at `https://falcon-picks.github.io/gridiron-edge/data/<league>.json` (nfl, college, nba or mlb).
 
 ## How it updates
 
