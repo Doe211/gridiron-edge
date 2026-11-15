@@ -10,7 +10,7 @@ create table if not exists public.boards (
   kickoff     timestamptz,
   team1       text not null,              -- across the top (home team)
   team2       text not null,              -- down the side (away team)
-  price       int  not null default 1 check (price between 0 and 100),   -- 🪙 per square
+  price       int  not null default 1 check (price between 0 and 100),   -- ⚾ per square
   prizes      int[] check (prizes is null or cardinality(prizes) = 4),   -- Q1, Q2, Q3, Final; null = split the pot
   top_digits  int[],                      -- 0-9 shuffled, column order (team1)
   side_digits int[],                      -- 0-9 shuffled, row order (team2)

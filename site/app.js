@@ -46,7 +46,7 @@ function payText(n) {
     .sort((a, b) => b[0] - a[0]).map(([w, x]) => `${w} of ${n} pays ${x}`);
   return `${n} for ${n} pays ${fullPay(n)} for 1${extras.length ? ` (also ${extras.join(", ")})` : ""}`;
 }
-const COIN = "🪙";
+const COIN = "⚾";
 const MIN_LEGS = 3, MAX_LEGS = 12, MAX_WAGER = 100;
 const coins = (n) => `${Number.isInteger(n) ? n : n.toFixed(1)} ${COIN}`;
 
@@ -846,7 +846,7 @@ function renderAllPicks() {
 function downloadPicks() {
   const games = new Map(D().games.map((g) => [g.id, g]));
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const out = [["Ticket #", "Name", "Placed", "Wager", "Picks", "Ticket result", "Net coins", "Game", "Pick", "Line", "Pick result"].map(q).join(",")];
+  const out = [["Ticket #", "Name", "Placed", "Wager", "Picks", "Ticket result", "Net baseballs", "Game", "Pick", "Line", "Pick result"].map(q).join(",")];
   for (const t of state.allPicks || []) {
     const grade = gradeTicket(t, t.ticket_picks || [], games);
     for (const l of t.ticket_picks || []) {
