@@ -99,7 +99,7 @@ function renderBoard(b) {
   let html = `<div class="toolbar"><button class="pick" id="board-back">← All boards</button>
     ${admin && !b.top_digits ? `<button class="pick primary" id="board-draw" data-id="${b.id}">Draw numbers</button>` : ""}
     ${admin ? `<button class="pick danger" id="board-delete" data-id="${b.id}">Delete board</button>` : ""}</div>`;
-  html += `<section class="sq">
+  html += `<section class="sq${admin ? " admin-view" : ""}">
     <div class="sq-top">
       <div class="sq-brand"><div class="sq-title">${esc(b.title)}</div><div class="sq-kind">FOOTBALL SQUARES</div>
         <div class="sq-money"><span>PRICE PER SQUARE</span><b>${coins(b.price)}</b><span>TOTAL POT</span><b>${coins(pot(b))} <small>(${potSquares(b)} of ${POT_SQUARES})</small></b></div>
