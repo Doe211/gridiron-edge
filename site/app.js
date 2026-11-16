@@ -217,7 +217,26 @@ function lineStatus(g) {
 function publishBar() {
   const n = unpublishedIds().length;
   return `<div class="publish-bar ${n ? "pending" : ""}"><span>${n ? `${n} line change${n === 1 ? "" : "s"} not published yet. Players don't see ${n === 1 ? "it" : "them"} until you publish.` : "All your lines are published. Players see exactly what you see under Spread and Over/under."}</span>
-    <button class="pick primary" id="publish-lines" ${n ? "" : "disabled"}>Publish lines</button></div>`;
+    <span class="publish-actions">${vegasFillable().length ? `<button class="pick" id="fill-vegas">Fill all with Vegas</button>` : ""}<button class="pick primary" id="publish-lines" ${n ? "" : "disabled"}>Publish lines</button></span></div>`;
+}
+/** Administrator: this week's games that have no line of yours yet but do have a Vegas line. */
+function vegasFillable() {
+  return upcomingGames().filter((g) => !g.draft && !isFinal(g) && !(g.kickoff && new Date(g.kickoff) <= new Date())
+    && (g.vegas_spread != null || g.vegas_total != null));
+}
+/** Copies the Vegas spread and over/under into every blank line slot at once (as drafts). Lines you set yourself are left alone. */
+async function fillAllVegas() {
+  const games = vegasFillable(), b = $("#fill-vegas");
+  if (!games.length) { toast("Every game already has a line."); return; }
+  if (b) b.disabled = true;
+  const now = new Date().toISOString();
+  const rows = games.map((g) => ({ game_id: g.id, spread: g.vegas_spread ?? null, total: g.vegas_total ?? null, updated_at: now }));
+  const { error } = await db.from("lines").upsert(rows);
+  if (error) { toast("Couldn't fill the lines. Check your connection and try again."); if (b) b.disabled = false; return; }
+  for (const r of rows) state.drafts[r.game_id] = { spread: r.spread == null ? null : Number(r.spread), total: r.total == null ? null : Number(r.total) };
+  for (const d of Object.values(state.data)) if (d.raw) d.games = applyOverrides(d.raw);
+  render();
+  toast(`Filled ${rows.length} game${rows.length === 1 ? "" : "s"} with Vegas lines. Change any you like, then press Publish lines.`);
 }
 
 function renderWeek() {
@@ -396,6 +415,7 @@ document.addEventListener("click", (e) => {
   else if (b.id === "adj-vegas") submitAdjust(true);
   else if (b.id === "adj-remove") { saveLine(adjusting.id, null).then((ok) => ok && $("#adjust").close()); }
   else if (b.id === "publish-lines") publishLines();
+  else if (b.id === "fill-vegas") { if (b.dataset.armed) fillAllVegas(); else { b.dataset.armed = "1"; b.textContent = `Tap again to fill ${vegasFillable().length} blank line${vegasFillable().length === 1 ? "" : "s"}`; } }
   else if (b.id === "admin-signout") adminSignOut();
   else if (b.id === "deadline-save") {
     const v = $("#deadline").value;
