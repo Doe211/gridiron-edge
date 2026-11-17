@@ -409,7 +409,10 @@ document.addEventListener("click", (e) => {
   else if (b.id === "ticket-clear") { clearDraft(); render(); }
   else if (b.id === "review-place") placeTicket();
   else if (b.dataset.void) { if (b.dataset.armed) voidTicket(Number(b.dataset.void)); else { b.dataset.armed = "1"; b.textContent = "Tap again to void"; } }
-  else if (b.dataset.certify) { b.disabled = true; certifyTicket(Number(b.dataset.certify), true); }
+  else if (b.dataset.certify) {
+    if (b.dataset.override && !b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to let it count"; }
+    else { b.disabled = true; certifyTicket(Number(b.dataset.certify), true); }
+  }
   else if (b.dataset.uncertify) { if (b.dataset.armed) { b.disabled = true; certifyTicket(Number(b.dataset.uncertify), false); } else { b.dataset.armed = "1"; b.textContent = "Tap again to undo"; } }
   else if (b.dataset.adjust) openAdjust(b.dataset.adjust);
   else if (b.dataset.removeAdj) saveLine(b.dataset.removeAdj, null).then(renderAdminList);
@@ -592,6 +595,7 @@ async function placeTicket() {
 /** Grades a ticket using the payout chart. A push drops that pick and the ticket is graded
  *  as the smaller ticket; with fewer than 3 picks left and no losses, the wager is returned. */
 function gradeTicket(t, legs, games) {
+  if (t.voided_at) return { status: "void", net: 0, label: "Voided" };
   let wins = 0, losses = 0, pushes = 0, pending = 0;
   for (const l of legs) {
     const r = pickResult(games.get(l.game_id), l);
@@ -617,7 +621,7 @@ function gradeTicket(t, legs, games) {
 async function loadMyTickets() {
   if (!db || !session) return;
   const league = state.league;
-  const { data, error } = await db.from("tickets").select("number,name,league,wager,legs,placed_at,certified_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
+  const { data, error } = await db.from("tickets").select("number,name,league,wager,legs,placed_at,certified_at,voided_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
     .eq("league", league).eq("user_id", session.user.id).order("placed_at", { ascending: false });
   if (error) return;
   state.myTickets[league] = data;
@@ -653,15 +657,18 @@ function certifyBy(legs) {
 function certifyRow(t, legs, admin) {
   const by = certifyBy(legs), open = !by || by > new Date();
   const byText = by ? by.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  if (t.voided_at) {
+    return `<div class="tb-row certify pending"><span>✕ Voided: not certified an hour before the first game.</span><span class="spacer"></span>${admin ? `<button class="pick primary" data-certify="${t.number}" data-override="1">Override void</button>` : ""}</div>`;
+  }
   if (t.certified_at) {
     return `<div class="tb-row certify ok"><span>✓ Certified</span><span class="spacer"></span>${admin && open ? `<button class="pick" data-uncertify="${t.number}">Undo certify</button>` : ""}</div>`;
   }
-  return `<div class="tb-row certify pending"><span>⚠ Not certified yet. ${by ? `Must be certified by ${esc(byText)} or it's voided.` : ""}</span><span class="spacer"></span>${admin && open ? `<button class="pick primary" data-certify="${t.number}">Certify</button>` : ""}</div>`;
+  return `<div class="tb-row certify pending"><span>⚠ Not certified yet. ${by ? `Must be certified by ${esc(byText)} or it's voided.` : ""}</span><span class="spacer"></span>${admin ? `<button class="pick primary" data-certify="${t.number}">Certify</button>` : ""}</div>`;
 }
 async function certifyTicket(number, certified) {
   const { error } = await db.rpc("certify_ticket", { p_number: number, p_certified: certified });
-  if (error) { toast(/late/i.test(error.message || "") ? "Too late: certify at least an hour before the first game." : "Couldn't update the ticket. Try again."); return; }
-  toast(certified ? `Ticket #${number} certified.` : `Ticket #${number} is no longer certified.`);
+  if (error) { toast(/late/i.test(error.message || "") ? "Too late to undo: the certify deadline has passed." : "Couldn't update the ticket. Try again."); return; }
+  toast(certified ? `Ticket #${number} certified. It counts.` : `Ticket #${number} is no longer certified.`);
   loadAllPicks();
 }
 
@@ -819,7 +826,7 @@ async function loadAllPicks() {
   render();
   const league = state.league, rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await db.from("tickets").select("number,name,wager,legs,placed_at,certified_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
+    const { data, error } = await db.from("tickets").select("number,name,wager,legs,placed_at,certified_at,voided_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
       .eq("league", league).order("number", { ascending: true }).range(from, from + 999);
     if (error) { state.allPicksStatus = "Couldn't load tickets. Try again."; render(); return; }
     rows.push(...data);
@@ -871,20 +878,20 @@ function renderAllPicks() {
   const w = weeks.includes(state.picksWeek) ? state.picksWeek : weeks[0];
   const tickets = all.filter((t) => ticketWeek(t, games) === w);
   const graded = tickets.map((t) => ({ t, grade: gradeTicket(t, t.ticket_picks || [], games) }));
-  const wagered = tickets.reduce((a, t) => a + t.wager, 0);
+  const wagered = tickets.filter((t) => !t.voided_at).reduce((a, t) => a + t.wager, 0);
   const paid = graded.filter((x) => x.grade.status === "won").reduce((a, x) => a + x.grade.net + x.t.wager, 0);
   const count = (st) => graded.filter((x) => x.grade.status === st).length;
   html += `<div class="toolbar"><label for="picks-week">Week:</label><select id="picks-week">${weeks.map((x) => `<option value="${x}" ${x === w ? "selected" : ""}>${esc(weekLabel(x))}</option>`).join("")}</select>
     <button class="pick" id="picks-refresh">Refresh</button><button class="pick" id="picks-csv">Download spreadsheet</button></div>
-    ${(() => { const n = tickets.filter((t) => !t.certified_at).length; return n ? `<div class="publish-bar pending"><span>${n} ticket${n === 1 ? "" : "s"} not certified yet. Press Certify on each one at least an hour before its first game, or it's voided automatically.</span></div>` : ""; })()}
-    <div class="summary">${stat("Tickets", String(tickets.length))}${stat("Won", String(count("won")))}${stat("Lost", String(count("lost")))}${stat("Pending", String(count("pending")))}${stat("Wagered", coins(wagered))}${stat("Paid out", coins(paid))}</div>`;
-  const order = { won: 0, pending: 1, refund: 2, lost: 3 };
+    ${(() => { const n = tickets.filter((t) => !t.certified_at && !t.voided_at).length; return n ? `<div class="publish-bar pending"><span>${n} ticket${n === 1 ? "" : "s"} not certified yet. Press Certify on each one at least an hour before its first game, or it's voided automatically.</span></div>` : ""; })()}
+    <div class="summary">${stat("Tickets", String(tickets.length))}${stat("Won", String(count("won")))}${stat("Lost", String(count("lost")))}${stat("Pending", String(count("pending")))}${count("void") ? stat("Voided", String(count("void"))) : ""}${stat("Wagered", coins(wagered))}${stat("Paid out", coins(paid))}</div>`;
+  const order = { won: 0, pending: 1, refund: 2, lost: 3, void: 4 };
   graded.sort((a, b) => order[a.grade.status] - order[b.grade.status] || b.grade.net - a.grade.net || a.t.number - b.t.number);
   html += `<h2>Tickets</h2><div class="table standings"><div class="row head"><span class="t">Ticket</span><span class="c">Picks</span><span class="c">Wager</span><span class="c wide">Result</span></div>`
     + graded.map(({ t, grade }) => `<div class="row"><span class="t"><b>#${t.number}</b> ${esc(t.name)}</span><span class="c">${t.legs}</span><span class="c">${t.wager}</span>
       <span class="c wide status-pill ${grade.status}">${esc(grade.status === "won" ? `+${coins(grade.net)}` : grade.status === "lost" ? `−${coins(t.wager)}` : grade.label)}</span></div>`).join("") + `</div>`;
   html += `<h2>Every ticket</h2><div class="cards">${graded.map(({ t }) => ticketCard(t, games, true)).join("")}</div>`;
-  return html + `<p class="note">A ✗ is a losing pick. Any loss loses the ticket, except that a 10-pick ticket still pays for 9 of 10 or 0 of 10. A push drops that pick, and the ticket is paid at the smaller size; with fewer than ${MIN_LEGS} winning picks left, the wager is returned. Each pick is judged at the line when the ticket was placed. Void removes a ticket for good. A ticket that isn't certified an hour before its first game is voided automatically.</p>`;
+  return html + `<p class="note">A ✗ is a losing pick. Any loss loses the ticket, except that a 10-pick ticket still pays for 9 of 10 or 0 of 10. A push drops that pick, and the ticket is paid at the smaller size; with fewer than ${MIN_LEGS} winning picks left, the wager is returned. Each pick is judged at the line when the ticket was placed. Void removes a ticket for good. A ticket that isn't certified an hour before its first game is voided automatically; press Override void to let it count anyway.</p>`;
 }
 
 function downloadPicks() {

@@ -216,6 +216,8 @@ dialog p { margin: 4px 0; color: var(--text); }
 .status-pill { border-radius: 999px; padding: 4px 12px; font-weight: 800; font-size: 14px; background: var(--panel-2); }
 .status-pill.won { background: var(--accent-soft); color: var(--accent); }
 .status-pill.lost { color: var(--bad); }
+.status-pill.void { color: var(--muted, #888); text-decoration: line-through; }
+.card.ticket.void { opacity: 0.7; }
 .card.ticket.lost { opacity: .85; }
 .standings .c.wide { width: auto; min-width: 110px; text-align: right; }
 

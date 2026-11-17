@@ -96,3 +96,39 @@ begin
   return t_number;
 end;
 $$;
+
+-- ---------- Void override ----------
+-- Late tickets are marked voided (kept, not deleted) so the administrator can override:
+-- certify_ticket(number) works any time and clears the void.
+alter table public.tickets add column if not exists voided_at timestamptz;
+
+create or replace function public.void_uncertified_tickets() returns int
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  update tickets t set voided_at = now()
+  where t.certified_at is null and t.voided_at is null
+    and now() >= (select min(p.kickoff) - interval '1 hour' from ticket_picks p where p.ticket_number = t.number);
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.void_uncertified_tickets() from public, anon, authenticated;
+
+create or replace function public.certify_ticket(p_number bigint, p_certified boolean default true) returns timestamptz
+language plpgsql security definer set search_path = public as $$
+declare by_time timestamptz := public.ticket_certify_by(p_number); result timestamptz;
+begin
+  if not public.is_admin() then raise exception 'Only the administrator can certify tickets'; end if;
+  if not p_certified and by_time is not null and now() >= by_time then
+    raise exception 'Too late to undo: the certify deadline has passed';
+  end if;
+  update tickets set certified_at = case when p_certified then now() else null end,
+                     voided_at = case when p_certified then null else voided_at end
+  where number = p_number returning certified_at into result;
+  if not found then raise exception 'Ticket % not found', p_number; end if;
+  return result;
+end;
+$$;
+revoke all on function public.certify_ticket(bigint, boolean) from public;
+grant execute on function public.certify_ticket(bigint, boolean) to authenticated;
