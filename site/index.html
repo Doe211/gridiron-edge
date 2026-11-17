@@ -135,6 +135,14 @@
     <p class="status" id="deadline-status" role="status"></p>
     <h3>Your lines</h3>
     <div class="table" id="admin-list"></div>
+    <h3>Invites</h3>
+    <p class="note">Gridiron Edge is invite only. Make a link for each person and send it to them. A link works on the first device that opens it, and nowhere else. If someone gets a new phone or clears their browser, press Reset and send them the new link.</p>
+    <form id="invite-form" class="invite-new">
+      <input id="invite-name" maxlength="40" placeholder="Person's name" autocomplete="off">
+      <button class="pick primary" type="submit">Create link</button>
+    </form>
+    <p class="status" id="invite-status" role="status"></p>
+    <div class="table" id="invite-list"></div>
     <div class="dialog-actions"><button class="pick" id="admin-signout">Sign out on this device</button></div>
   </div>
   <p class="status" id="admin-status" role="status"></p>

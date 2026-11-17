@@ -365,6 +365,8 @@ function renderRatings() {
 }
 
 function render() {
+  document.body.classList.toggle("locked", !!state.locked);
+  if (state.locked) { $("#main").innerHTML = lockedScreen(); $("#updated").textContent = ""; return; }
   document.querySelectorAll("[data-league]").forEach((b) => b.setAttribute("aria-selected", b.dataset.league === state.league));
   document.querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === state.tab));
   $("#tab-picks").hidden = !isAdmin();
@@ -422,6 +424,9 @@ document.addEventListener("click", (e) => {
   else if (b.id === "publish-lines") publishLines();
   else if (b.id === "fill-vegas") { if (b.dataset.armed) fillAllVegas(); else { b.dataset.armed = "1"; b.textContent = `Tap again to fill ${vegasFillable().length} blank line${vegasFillable().length === 1 ? "" : "s"}`; } }
   else if (b.id === "admin-signout") adminSignOut();
+  else if (b.dataset.inviteCopy) copyInvite(b.dataset.inviteCopy);
+  else if (b.dataset.inviteReset) { if (b.dataset.armed) resetInvite(Number(b.dataset.inviteReset)); else { b.dataset.armed = "1"; b.textContent = "Tap again: new link"; } }
+  else if (b.dataset.inviteRemove) { if (b.dataset.armed) removeInvite(Number(b.dataset.inviteRemove)); else { b.dataset.armed = "1"; b.textContent = "Tap again to remove"; } }
   else if (b.id === "deadline-save") {
     const v = $("#deadline").value;
     if (!v) $("#deadline-status").textContent = "Choose a date and time first.";
@@ -447,6 +452,7 @@ document.addEventListener("change", (e) => {
 document.addEventListener("submit", (e) => {
   if (e.target.id === "review-form") { e.preventDefault(); placeTicket(); }
   if (e.target.id === "signin-form") { e.preventDefault(); adminSignIn(); }
+  if (e.target.id === "invite-form") { e.preventDefault(); createInvite(); }
   if (e.target.id === "claim-form") { e.preventDefault(); claimSquare(); }
   if (e.target.id === "newboard-form") { e.preventDefault(); createBoard(); }
 });
@@ -689,7 +695,7 @@ function openAdmin() {
   $("#admin-status").textContent = "";
   $("#admin-setup").hidden = isAdmin();
   $("#admin-connected").hidden = !isAdmin();
-  if (isAdmin()) { renderAdminList(); renderDeadlineForm(); }
+  if (isAdmin()) { renderAdminList(); renderDeadlineForm(); $("#invite-status").textContent = ""; loadInvites(); }
   $("#admin").showModal();
 }
 
@@ -704,6 +710,7 @@ async function adminSignIn() {
   if (!isAdmin()) { $("#admin-status").textContent = "Signed in, but this account isn't the administrator."; return; }
   $("#admin-password").value = "";
   $("#admin-status").textContent = "";
+  if (state.locked) { await bootApp(); openAdmin(); return; }
   await loadShared().catch(() => {});
   openAdmin();
   await loadMyTickets();
@@ -712,12 +719,7 @@ async function adminSignIn() {
 
 async function adminSignOut() {
   await db.auth.signOut();
-  session = null; adminFlag = false;
-  state.drafts = {};
-  await loadShared().catch(() => {});
-  $("#admin").close();
-  if (state.tab === "picks") state.tab = "week";
-  render();
+  location.reload();
 }
 
 function renderAdminList() {
@@ -926,6 +928,19 @@ function toast(text) {
   if (!["week", "tickets", "results", "boards", "picks"].includes(state.tab)) state.tab = "week";
   render();
   try { await refreshSession(); } catch { /* the site still works without the database */ }
+  await handleInviteLink();
+  if (!(await checkMember())) {
+    state.locked = true;
+    render();
+    if (location.hash === "#admin") openAdmin();
+    return;
+  }
+  await bootApp();
+})();
+
+/** Loads the game (after the device is known to be invited, or the administrator). */
+async function bootApp() {
+  state.locked = false;
   await Promise.all([loadShared().catch(() => {}), loadLeague(state.league)]);
   render();
   loadMyTickets();
@@ -939,4 +954,90 @@ function toast(text) {
     if (state.tab === "boards") await loadBoards(true);
     render();
   }, 60000);
-})();
+}
+
+// ---------- invite only ----------
+const inviteLink = (code) => `${location.origin}${location.pathname}#invite=${code}`;
+
+/** Opening a personal link (#invite=CODE) claims it for this device. */
+async function handleInviteLink() {
+  const m = location.hash.match(/invite=([A-Za-z0-9]+)/);
+  if (!m || !db) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  if (isAdmin()) { state.inviteMessage = "You're signed in as the administrator, so this link wasn't used. Send it to the player to open on their device."; return; }
+  try {
+    if (!session) {
+      const { data, error } = await db.auth.signInAnonymously();
+      if (error) throw error;
+      session = data.session;
+    }
+    const { data, error } = await db.rpc("claim_invite", { p_code: m[1] });
+    if (error) throw error;
+    if (data && !playerName()) save("player_name", data);
+    state.inviteMessage = `Welcome${data ? `, ${data}` : ""}! This device now has access.`;
+  } catch (err) {
+    const msg = String(err && err.message || "");
+    state.inviteMessage = /Invite:/.test(msg) ? msg.replace(/^.*?Invite:\s*/, "") : "Couldn't open your invite. Check your connection and open the link again.";
+  }
+}
+
+async function checkMember() {
+  if (!db) return true;
+  if (isAdmin()) return true;
+  if (!session) return false;
+  const { data, error } = await db.rpc("am_member");
+  return !error && data === true;
+}
+
+function lockedScreen() {
+  return `<div class="locked-screen">
+    <div class="lock-icon">🔒</div>
+    <h1>Invite only</h1>
+    ${state.inviteMessage ? `<p class="warn">${esc(state.inviteMessage)}</p>` : ""}
+    <p>Gridiron Edge is private. To play, open the personal link the administrator sent you, on the device you'll play on.</p>
+    <p class="note">Each link works on one device only. If you got a new phone or cleared your browser, ask the administrator for a new link.</p>
+    <p class="note"><a href="#admin">Administrator sign in</a></p>
+  </div>`;
+}
+
+let invites = [];
+async function loadInvites() {
+  const { data, error } = await db.from("invites").select("id,name,code,claimed_at,created_at").order("created_at", { ascending: true });
+  if (error) { $("#invite-status").textContent = "Couldn't load invites."; return; }
+  invites = data; renderInvites();
+}
+function renderInvites() {
+  const when = (t) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  $("#invite-list").innerHTML = invites.length ? invites.map((v) => `<div class="row invite-row">
+    <span class="t"><b>${esc(v.name)}</b><br><span class="r">${v.claimed_at ? `✓ In use on a device since ${esc(when(v.claimed_at))}` : "Link not opened yet"}</span>
+    ${v.claimed_at ? "" : `<input class="invite-link" readonly value="${esc(inviteLink(v.code))}">`}</span>
+    <span class="invite-btns">${v.claimed_at ? "" : `<button class="pick primary" data-invite-copy="${esc(v.code)}">Copy link</button>`}
+    <button class="pick" data-invite-reset="${v.id}">Reset</button><button class="pick danger" data-invite-remove="${v.id}">Remove</button></span></div>`).join("")
+    : `<div class="row"><span class="t r">No invites yet. Type a name above and press Create link.</span></div>`;
+}
+async function createInvite() {
+  const name = $("#invite-name").value.trim();
+  if (!name) { $("#invite-status").textContent = "Type the person's name first."; return; }
+  $("#invite-status").textContent = "Creating…";
+  const { data, error } = await db.from("invites").insert({ name }).select("id,name,code,claimed_at,created_at").single();
+  if (error) { $("#invite-status").textContent = "Couldn't create the link. Try again."; return; }
+  $("#invite-name").value = "";
+  invites.push(data); renderInvites();
+  await copyInvite(data.code, `Link for ${name} created and copied. Send it to them.`);
+}
+async function copyInvite(code, done = "Link copied. Paste it into a text or email.") {
+  try { await navigator.clipboard.writeText(inviteLink(code)); $("#invite-status").textContent = done; }
+  catch { $("#invite-status").textContent = "Copy the link from the box under the name."; }
+}
+async function resetInvite(id) {
+  const { data, error } = await db.rpc("reset_invite", { p_id: id });
+  if (error) { $("#invite-status").textContent = "Couldn't reset. Try again."; return; }
+  await loadInvites();
+  await copyInvite(data, "New link created and copied. The old link and device no longer work.");
+}
+async function removeInvite(id) {
+  const { error } = await db.from("invites").delete().eq("id", id);
+  if (error) { $("#invite-status").textContent = "Couldn't remove. Try again."; return; }
+  $("#invite-status").textContent = "Removed. That device no longer has access.";
+  loadInvites();
+}

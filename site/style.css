@@ -338,3 +338,13 @@ dialog ul.rules li { margin: 3px 0; }
 .tb-row.certify.ok { color: var(--accent); }
 .tb-row.certify.pending { color: #b35c00; }
 @media (prefers-color-scheme: dark) { .certify-rule { background: #2e2210; color: #f2c27a; } .tb-row.certify.pending { color: #f2c27a; } }
+
+/* Invite only */
+body.locked .tabs, body.locked .leagues, body.locked #about-btn { display: none; }
+.locked-screen { max-width: 520px; margin: 48px auto; text-align: center; }
+.locked-screen .lock-icon { font-size: 48px; }
+.invite-new { display: flex; gap: 8px; margin: 8px 0; }
+.invite-new input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line, #ccc); font: inherit; }
+.invite-row { align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.invite-link { width: 100%; margin-top: 6px; font-size: 12px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #ccc); background: var(--panel-2, #f4f4f4); color: inherit; }
+.invite-btns { display: flex; gap: 6px; flex-wrap: wrap; }
