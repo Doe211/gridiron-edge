@@ -348,3 +348,14 @@ body.locked .tabs, body.locked .leagues, body.locked #about-btn { display: none;
 .invite-row { align-items: flex-start; gap: 8px; flex-wrap: wrap; }
 .invite-link { width: 100%; margin-top: 6px; font-size: 12px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #ccc); background: var(--panel-2, #f4f4f4); color: inherit; }
 .invite-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Several boards at once (administrator) */
+.boards-actions { display: flex; align-items: center; gap: 10px; }
+.board-tile.picking { cursor: pointer; opacity: .75; }
+.board-tile.picked { opacity: 1; outline: 3px solid #ffd27a; }
+.seg { display: inline-flex; gap: 4px; }
+.seg .pick[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.board-multi { display: grid; gap: 28px; }
+.board-multi.side { grid-template-columns: repeat(auto-fit, minmax(min(100%, 620px), 1fr)); align-items: start; }
+.board-multi-item h2 { margin: 0 0 8px; }
+.board-multi-item .sq-legend { font-size: 12px; }

@@ -7,6 +7,10 @@ const QUARTERS = ["Q1", "Q2", "Q3", "Final"];
 state.boards = null;          // list of boards
 state.boardsStatus = "";
 state.board = null;           // id of the board being viewed
+state.boardMulti = null;      // administrator: ids of the boards shown together
+state.boardPicking = false;   // administrator: choosing boards to show together
+state.boardPick = new Set();
+state.boardSideBySide = load("board_side_by_side", true);
 state.squares = {};           // board id -> Map(square -> row)
 
 async function ensureSession() {
@@ -28,6 +32,7 @@ async function loadBoards(quiet = false) {
   for (const b of data) state.squares[b.id] = new Map();
   for (const r of sq || []) state.squares[r.board_id]?.set(r.square, r);
   if (state.board && !data.some((b) => b.id === state.board)) state.board = null;
+  if (state.boardMulti) { state.boardMulti = state.boardMulti.filter((id) => data.some((b) => b.id === id)); if (!state.boardMulti.length) state.boardMulti = null; }
   render();
 }
 
@@ -69,22 +74,35 @@ function winnerSquare(b, score) {
 // ---- rendering ----
 function renderBoards() {
   const admin = isAdmin();
+  if (admin && state.boardMulti?.length) return renderMultiBoards();
   if (state.board && boardById(state.board)) return renderBoard(boardById(state.board));
-  let html = `<div class="boards-head"><h1>Boards</h1>${admin ? `<button class="plus" id="board-new" aria-label="New board" title="New board">+</button>` : ""}</div>`;
+  let html = `<div class="boards-head"><h1>Boards</h1>${admin ? `<span class="boards-actions">${(state.boards?.length || 0) > 1 ? `<button class="pick" id="board-pick">${state.boardPicking ? "Cancel" : "View several"}</button>` : ""}<button class="plus" id="board-new" aria-label="New board" title="New board">+</button></span>` : ""}</div>`;
   if (state.boardsStatus) return html + `<div class="empty">${esc(state.boardsStatus)}</div>`;
   if (!state.boards) return html + `<div class="empty">Loading boards…</div>`;
   if (!state.boards.length) return html + `<div class="empty">No boards yet.${admin ? " Press + to make one." : ""}</div>`;
+  const picking = admin && state.boardPicking;
+  if (picking) html += `<div class="toolbar"><button class="pick primary" id="board-show-picked" ${state.boardPick.size ? "" : "disabled"}>Show selected (${state.boardPick.size})</button><button class="pick" id="board-show-all">Show all</button><span class="note">Tap the boards you want to see together.</span></div>`;
   return html + `<div class="board-list">${state.boards.map((b) => {
     const n = taken(b);
     const status = b.scores?.final ? "Final" : boardClosed(b) ? (b.top_digits ? "Numbers drawn" : "Closed") : `${100 - n} squares open`;
-    return `<button class="board-tile" data-board="${b.id}">
-      <span class="bt-title">${esc(b.title)}</span>
+    const on = picking && state.boardPick.has(b.id);
+    return `<button class="board-tile${picking ? " picking" : ""}${on ? " picked" : ""}" ${picking ? `data-board-pick="${b.id}" aria-pressed="${on}"` : `data-board="${b.id}"`}>
+      <span class="bt-title">${picking ? (on ? "☑ " : "☐ ") : ""}${esc(b.title)}</span>
       <span class="bt-sub">${esc(BOARD_LEAGUES[b.league] || "")} · ${esc(b.team2)} at ${esc(b.team1)}${b.kickoff ? " · " + esc(new Date(b.kickoff).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })) : ""}</span>
       <span class="bt-meta">${coins(b.price)} a square · Pot ${coins(pot(b))} · ${esc(status)}</span></button>`;
-  }).join("")}</div><p class="note">Tap a board to open it.</p>`;
+  }).join("")}</div><p class="note">${picking ? "" : "Tap a board to open it."}</p>`;
 }
 
-function renderBoard(b) {
+/** Administrator: several boards on one screen. */
+function renderMultiBoards() {
+  const boards = state.boardMulti.map(boardById).filter(Boolean);
+  let html = `<div class="toolbar"><button class="pick" id="board-back">← All boards</button>
+    <span class="seg"><button class="pick" id="board-layout-side" aria-pressed="${state.boardSideBySide}">Side by side</button><button class="pick" id="board-layout-stack" aria-pressed="${!state.boardSideBySide}">One under another</button></span>
+    <span class="note">${boards.length} boards</span></div>`;
+  return html + `<div class="board-multi ${state.boardSideBySide ? "side" : "stack"}">${boards.map((b) => `<div class="board-multi-item"><h2>${esc(b.title)}</h2>${renderBoard(b, true)}</div>`).join("")}</div>`;
+}
+
+function renderBoard(b, multi = false) {
   const admin = isAdmin(), sq = state.squares[b.id] || new Map(), sc = b.scores;
   const palette = admin ? playerColors(sq) : null;
   const me = session?.user?.id;
@@ -96,7 +114,7 @@ function renderBoard(b) {
     return { label, score, w, who, prize: prizeFor(b, q) };
   });
   const digit = (arr, i) => (arr ? arr[i] : "");
-  let html = `<div class="toolbar"><button class="pick" id="board-back">← All boards</button>
+  let html = `<div class="toolbar">${multi ? "" : `<button class="pick" id="board-back">← All boards</button>`}
     ${admin && !b.top_digits ? `<button class="pick primary" id="board-draw" data-id="${b.id}">Draw numbers</button>` : ""}
     ${admin ? `<button class="pick danger" id="board-delete" data-id="${b.id}">Delete board</button>` : ""}</div>`;
   html += `<section class="sq${admin ? " admin-view" : ""}">
@@ -122,7 +140,7 @@ function renderBoard(b) {
           const tint = admin && row ? palette.colors.get(row.user_id) : null;
           const cls = ["sq-sq", row ? "taken" : "open", !tint && row && row.user_id === me ? "mine" : "", wins ? "winner" : "", tint ? "tinted" : ""].join(" ");
           const canAct = (!row && !boardClosed(b)) || (row && admin && !b.top_digits);
-          return `<button class="${cls}" ${tint ? `style="background:${tint}"` : ""} ${canAct ? `data-square="${i}"` : "disabled"} title="${row ? esc(playerTag(row)) : `Square ${i + 1}`}">
+          return `<button class="${cls}" ${tint ? `style="background:${tint}"` : ""} ${canAct ? `data-square="${i}" data-bid="${b.id}"` : "disabled"} title="${row ? esc(playerTag(row)) : `Square ${i + 1}`}">
             ${wins ? `<em>${wins.join(" ")}</em>${winnerBall(row)}` : `<span class="nm">${row ? esc(row.name) : ""}${row?.player_no ? `<b class="pn">#${row.player_no}</b>` : ""}</span>`}<small>${i + 1}</small></button>`;
         }).join("")).join("")}
       </div></div>
@@ -133,6 +151,7 @@ function renderBoard(b) {
     html += `<div class="sq-legend"><b>Players (only you see the colors):</b> ${palette.people.map((r) =>
       `<span class="chip"><i style="background:${palette.colors.get(r.user_id)}"></i>${esc(playerTag(r))} · ${count(r.user_id)}</span>`).join("")}</div>`;
   }
+  if (multi) return html;
   const open = 100 - sq.size;
   html += `<p class="note">${boardClosed(b)
     ? (b.top_digits ? "The numbers are drawn, so this board is locked." : "The game has started, so this board is closed.")
@@ -147,12 +166,17 @@ function renderBoard(b) {
 let claiming = null;
 function boardClick(b) {
   if (b.dataset.board) { state.board = Number(b.dataset.board); render(); window.scrollTo({ top: 0 }); }
-  else if (b.id === "board-back") { state.board = null; render(); }
+  else if (b.id === "board-back") { state.board = null; state.boardMulti = null; render(); }
+  else if (b.id === "board-pick") { state.boardPicking = !state.boardPicking; state.boardPick = new Set(); render(); }
+  else if (b.dataset.boardPick) { const id = Number(b.dataset.boardPick); state.boardPick.has(id) ? state.boardPick.delete(id) : state.boardPick.add(id); render(); }
+  else if (b.id === "board-show-picked") { state.boardMulti = state.boards.map((x) => x.id).filter((id) => state.boardPick.has(id)); state.boardPicking = false; render(); window.scrollTo({ top: 0 }); }
+  else if (b.id === "board-show-all") { state.boardMulti = state.boards.map((x) => x.id); state.boardPicking = false; render(); window.scrollTo({ top: 0 }); }
+  else if (b.id === "board-layout-side" || b.id === "board-layout-stack") { state.boardSideBySide = b.id === "board-layout-side"; save("board_side_by_side", state.boardSideBySide); render(); }
   else if (b.id === "board-new") openNewBoard();
   else if (b.id === "board-draw") { if (b.dataset.armed) drawNumbers(Number(b.dataset.id)); else { b.dataset.armed = "1"; b.textContent = "Tap again to draw (locks the board)"; } }
   else if (b.id === "board-delete") { if (b.dataset.armed) deleteBoard(Number(b.dataset.id)); else { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; } }
   else if (b.dataset.square) {
-    const bd = boardById(state.board), i = Number(b.dataset.square), row = state.squares[bd.id]?.get(i);
+    const bd = boardById(Number(b.dataset.bid) || state.board), i = Number(b.dataset.square), row = state.squares[bd.id]?.get(i);
     if (row) { if (b.dataset.armed) clearSquare(bd.id, i); else { b.dataset.armed = "1"; b.querySelector(".nm").textContent = "Tap to clear"; } return; }
     claiming = { board: bd.id, square: i };
     $("#claim-title").textContent = `Square ${i + 1} on ${bd.title}`;
