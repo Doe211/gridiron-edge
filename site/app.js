@@ -366,6 +366,7 @@ function renderRatings() {
 
 function render() {
   document.body.classList.toggle("locked", !!state.locked);
+  $("#admin-btn").hidden = !isAdmin();
   if (state.locked) { $("#main").innerHTML = lockedScreen(); $("#updated").textContent = ""; return; }
   document.querySelectorAll("[data-league]").forEach((b) => b.setAttribute("aria-selected", b.dataset.league === state.league));
   document.querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === state.tab));
@@ -407,6 +408,7 @@ document.addEventListener("click", (e) => {
   else if (b.dataset.pick) setPick("side", b.dataset.id, b.dataset.pick);
   else if (b.dataset.total) setPick("total", b.dataset.id, b.dataset.total);
   else if (b.id === "about-btn") $("#about").showModal();
+  else if (b.id === "admin-btn") openAdmin();
   else if (b.id === "ticket-review") openReview();
   else if (b.id === "ticket-clear") { clearDraft(); render(); }
   else if (b.id === "review-place") placeTicket();
