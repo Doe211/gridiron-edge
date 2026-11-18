@@ -100,3 +100,11 @@ begin
     end if;
   end loop;
 end $$;
+
+-- The administrator is one exact account (its user id), not just whoever has that email address.
+alter table public.admins add column if not exists user_id uuid unique references auth.users (id) on delete cascade;
+update public.admins a set user_id = u.id from auth.users u where lower(u.email) = lower(a.email) and a.user_id is null;
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and exists (select 1 from public.admins where user_id = auth.uid());
+$$;

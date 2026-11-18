@@ -998,7 +998,6 @@ function lockedScreen() {
     ${state.inviteMessage ? `<p class="warn">${esc(state.inviteMessage)}</p>` : ""}
     <p>Gridiron Edge is private. To play, open the personal link the administrator sent you, on the device you'll play on.</p>
     <p class="note">Each link works on one device only. If you got a new phone or cleared your browser, ask the administrator for a new link.</p>
-    <p class="note"><a href="#admin">Administrator sign in</a></p>
   </div>`;
 }
 
