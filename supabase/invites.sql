@@ -108,3 +108,49 @@ create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
   select auth.uid() is not null and exists (select 1 from public.admins where user_id = auth.uid());
 $$;
+
+-- ---------- One device at a time ----------
+-- Opening a personal link always works: access moves to that device and the previous one is signed out.
+-- The player's tickets, squares and player number move with them.
+alter table public.invites add column if not exists moves int not null default 0;
+
+create or replace function public.claim_invite(p_code text) returns text
+language plpgsql security definer set search_path = public as $$
+declare inv invites%rowtype; old uuid; me uuid := auth.uid();
+begin
+  if me is null then raise exception 'Not signed in'; end if;
+  select * into inv from invites where code = trim(p_code) for update;
+  if not found then raise exception 'Invite: this link isn''t valid. Ask the administrator for a new one.'; end if;
+  if inv.claimed_by = me then return inv.name; end if;
+  if exists (select 1 from invites where claimed_by = me) then
+    raise exception 'Invite: this device is already signed in as someone else.';
+  end if;
+  old := inv.claimed_by;
+  update invites set claimed_by = me, claimed_at = now(), moves = moves + (case when old is null then 0 else 1 end)
+  where id = inv.id;
+  if old is not null then
+    update tickets set user_id = me where user_id = old;
+    update board_squares set user_id = me where user_id = old;
+    update picks set user_id = me where user_id = old;
+    if not exists (select 1 from players where user_id = me) then
+      update players set user_id = me where user_id = old;
+    end if;
+  end if;
+  return inv.name;
+end;
+$$;
+revoke all on function public.claim_invite(text) from public;
+grant execute on function public.claim_invite(text) to authenticated;
+
+create or replace function public.reset_invite(p_id bigint) returns text
+language plpgsql security definer set search_path = public as $$
+declare c text;
+begin
+  if not public.is_admin() then raise exception 'Only the administrator can reset invites'; end if;
+  update invites set code = replace(gen_random_uuid()::text, '-', ''), claimed_by = null, claimed_at = null, moves = 0
+  where id = p_id returning code into c;
+  return c;
+end;
+$$;
+revoke all on function public.reset_invite(bigint) from public;
+grant execute on function public.reset_invite(bigint) to authenticated;
