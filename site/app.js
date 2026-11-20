@@ -47,7 +47,10 @@ function payText(n) {
   return `${n} for ${n} pays ${fullPay(n)} for 1${extras.length ? ` (also ${extras.join(", ")})` : ""}`;
 }
 const COIN = "⚾";
-const MIN_LEGS = 3, MAX_LEGS = 12, MAX_WAGER = 100;
+const MIN_LEGS = 3, MAX_LEGS = 12;
+// Wagers: at least 1. A 3-pick ticket can wager at most 200; bigger tickets have no maximum.
+const MAX_WAGER_3 = 200, WAGER_CEILING = 2000000000;
+const maxWager = (n) => (n === 3 ? MAX_WAGER_3 : null);
 const coins = (n) => `${Number.isInteger(n) ? n : n.toFixed(1)} ${COIN}`;
 
 // ---------- helpers ----------
@@ -444,7 +447,7 @@ document.addEventListener("change", (e) => {
   if (e.target.id === "week") { state.week = Number(e.target.value); render(); }
   if (e.target.id === "picks-week") { state.picksWeek = Number(e.target.value); render(); }
   if (e.target.id === "wager") {
-    const v = Math.max(1, Math.min(MAX_WAGER, Math.round(Number(e.target.value) || 1)));
+    const v = Math.max(1, Math.min(WAGER_CEILING, Math.round(Number(e.target.value) || 1)));
     save("wager", v); render();
   }
   if (e.target.id === "nb-league") fillBoardGames();
@@ -527,8 +530,9 @@ function ticketBar() {
       <span class="r">${n < MIN_LEGS ? `Pick ${MIN_LEGS - n} more to place a ticket` : n > MAX_LEGS ? `Too many picks (max ${MAX_LEGS})` : payText(n)}</span></div>
     ${n ? `<div class="tb-legs">${legs.map((l) => `<span class="name-chip">${esc(legLabel(l))}</span>`).join("")}</div>` : ""}
     <div class="tb-row">
-      <label class="tb-wager">Wager <input id="wager" type="number" inputmode="numeric" min="1" max="${MAX_WAGER}" step="1" value="${wager}"> ${COIN}</label>
+      <label class="tb-wager">Wager <input id="wager" type="number" inputmode="numeric" min="1" ${maxWager(n) ? `max="${maxWager(n)}"` : ""} step="1" value="${wager}"> ${COIN}</label>
       ${toWin != null ? `<span>To win <b>${coins(toWin)}</b></span>` : ""}
+      ${maxWager(n) && wager > maxWager(n) ? `<span class="warn">Max wager on a 3-pick ticket is ${maxWager(n)} ${COIN}</span>` : ""}
       <span class="spacer"></span>
       ${n ? '<button class="pick" id="ticket-clear">Clear</button>' : ""}
       <button class="pick primary" id="ticket-review" ${ready ? "" : "disabled"}>Review ticket</button>
@@ -559,7 +563,9 @@ function clearDraft() {
 function openReview() {
   const legs = draftLegs(), wager = Math.round(Number(load("wager", 5)));
   if (legs.length < MIN_LEGS || legs.length > MAX_LEGS) return;
-  if (!(wager >= 1 && wager <= MAX_WAGER)) { toast(`Wager 1 to ${MAX_WAGER} ${COIN}.`); return; }
+  const cap = maxWager(legs.length);
+  if (!(wager >= 1)) { toast(`Wager at least 1 ${COIN}.`); return; }
+  if (cap && wager > cap) { toast(`The most you can wager on a ${legs.length}-pick ticket is ${cap} ${COIN}.`); return; }
   $("#review-legs").innerHTML = legs.map((l) => `<li>${esc(legLabel(l))}<small> · ${esc(when(l.g))}</small></li>`).join("");
   $("#review-summary").innerHTML = `${payText(legs.length)} · Wager <b>${coins(wager)}</b> · To win <b>${coins(fullPay(legs.length) * wager)}</b>`;
   $("#review-name").value = playerName();
