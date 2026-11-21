@@ -635,7 +635,7 @@ function gradeTicket(t, legs, games) {
 async function loadMyTickets() {
   if (!db || !session) return;
   const league = state.league;
-  const { data, error } = await db.from("tickets").select("number,name,league,wager,legs,placed_at,certified_at,voided_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
+  const { data, error } = await db.from("tickets").select("number,name,league,wager,legs,placed_at,certified_at,voided_at,player_no,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
     .eq("league", league).eq("user_id", session.user.id).order("placed_at", { ascending: false });
   if (error) return;
   state.myTickets[league] = data;
@@ -645,12 +645,14 @@ async function loadMyTickets() {
   if (league === state.league) render();
 }
 
+/** "Player #1117": each person's permanent number (from their invite), on every ticket. */
+const playerTag = (n) => (n ? `Player #${n}` : "");
 function ticketCard(t, games, admin = false) {
   const legs = t.ticket_picks || [];
   const grade = gradeTicket(t, legs, games);
   const placed = new Date(t.placed_at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   return `<article class="card ticket ${grade.status}">
-    <div class="card-head"><span class="matchup">Ticket #${t.number}${admin ? ` · ${esc(t.name)}` : ""}</span><span class="when">Placed ${esc(placed)}</span></div>
+    <div class="card-head"><span class="matchup">Ticket #${t.number}${admin ? ` · ${esc(adminPlayerLabel(t))}` : ""}</span><span class="when">Placed ${esc(placed)}</span></div>
     <ul class="legs">${legs.slice().sort((a, b) => (a.kickoff || "").localeCompare(b.kickoff || "")).map((l) => {
       const g = games.get(l.game_id), r = pickResult(g, l);
       const label = g ? legLabel({ ...l, g }, Number(l.line)) : `${l.matchup}: ${l.choice} ${l.line}`;
@@ -694,7 +696,8 @@ function renderMyTickets() {
   const games = new Map(D().games.map((g) => [g.id, g]));
   let net = 0;
   for (const t of list) net += gradeTicket(t, t.ticket_picks || [], games).net;
-  html += `<div class="summary">${stat("Tickets", String(list.length))}${stat("Net", `${net >= 0 ? "+" : "−"}${coins(Math.abs(net))}`)}</div>`;
+  const mine = list.find((t) => t.player_no)?.player_no;
+  html += `<div class="summary">${mine ? stat("You are", playerTag(mine)) : ""}${stat("Tickets", String(list.length))}${stat("Net", `${net >= 0 ? "+" : "−"}${coins(Math.abs(net))}`)}</div>`;
   return html + `<div class="cards">${list.map((t) => ticketCard(t, games)).join("")}</div>`;
 }
 
@@ -830,13 +833,26 @@ function renderDeadlineForm() {
 }
 
 // ---------- All Tickets (administrator only) ----------
+/** Administrator: "Player #1117 · Taji", plus the name typed on the ticket when it's different. */
+function adminPlayerLabel(t) {
+  const who = state.playerNames?.[t.player_no];
+  if (!t.player_no) return t.name;
+  const base = `${playerTag(t.player_no)} · ${who || t.name}`;
+  return who && who.toLowerCase() !== String(t.name).toLowerCase() ? `${base} (ticket says “${t.name}”)` : base;
+}
+async function loadPlayerNames() {
+  const { data } = await db.from("players").select("number,name");
+  if (data) state.playerNames = Object.fromEntries(data.map((p) => [p.number, p.name]));
+}
+
 async function loadAllPicks() {
   if (!isAdmin()) return;
+  loadPlayerNames().then(render);
   state.allPicksStatus = "Loading tickets…";
   render();
   const league = state.league, rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await db.from("tickets").select("number,name,wager,legs,placed_at,certified_at,voided_at,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
+    const { data, error } = await db.from("tickets").select("number,name,wager,legs,placed_at,certified_at,voided_at,player_no,ticket_picks(game_id,matchup,kind,choice,line,kickoff)")
       .eq("league", league).order("number", { ascending: true }).range(from, from + 999);
     if (error) { state.allPicksStatus = "Couldn't load tickets. Try again."; render(); return; }
     rows.push(...data);
@@ -897,8 +913,8 @@ function renderAllPicks() {
     <div class="summary">${stat("Tickets", String(tickets.length))}${stat("Won", String(count("won")))}${stat("Lost", String(count("lost")))}${stat("Pending", String(count("pending")))}${count("void") ? stat("Voided", String(count("void"))) : ""}${stat("Wagered", coins(wagered))}${stat("Paid out", coins(paid))}</div>`;
   const order = { won: 0, pending: 1, refund: 2, lost: 3, void: 4 };
   graded.sort((a, b) => order[a.grade.status] - order[b.grade.status] || b.grade.net - a.grade.net || a.t.number - b.t.number);
-  html += `<h2>Tickets</h2><div class="table standings"><div class="row head"><span class="t">Ticket</span><span class="c">Picks</span><span class="c">Wager</span><span class="c wide">Result</span></div>`
-    + graded.map(({ t, grade }) => `<div class="row"><span class="t"><b>#${t.number}</b> ${esc(t.name)}</span><span class="c">${t.legs}</span><span class="c">${t.wager}</span>
+  html += `<h2>Tickets</h2><div class="table standings"><div class="row head"><span class="t">Ticket</span><span class="c wide">Player</span><span class="c">Picks</span><span class="c">Wager</span><span class="c wide">Result</span></div>`
+    + graded.map(({ t, grade }) => `<div class="row"><span class="t"><b>#${t.number}</b> ${esc(state.playerNames?.[t.player_no] || t.name)}</span><span class="c wide">${t.player_no ? `#${t.player_no}` : "—"}</span><span class="c">${t.legs}</span><span class="c">${t.wager}</span>
       <span class="c wide status-pill ${grade.status}">${esc(grade.status === "won" ? `+${coins(grade.net)}` : grade.status === "lost" ? `−${coins(t.wager)}` : grade.label)}</span></div>`).join("") + `</div>`;
   html += `<h2>Every ticket</h2><div class="cards">${graded.map(({ t }) => ticketCard(t, games, true)).join("")}</div>`;
   return html + `<p class="note">A ✗ is a losing pick. Any loss loses the ticket, except that a 10-pick ticket still pays for 9 of 10 or 0 of 10. A push drops that pick, and the ticket is paid at the smaller size; with fewer than ${MIN_LEGS} winning picks left, the wager is returned. Each pick is judged at the line when the ticket was placed. Void removes a ticket for good. A ticket that isn't certified an hour before its first game is voided automatically; press Override void to let it count anyway.</p>`;
@@ -907,12 +923,12 @@ function renderAllPicks() {
 function downloadPicks() {
   const games = new Map(D().games.map((g) => [g.id, g]));
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const out = [["Ticket #", "Name", "Placed", "Wager", "Picks", "Ticket result", "Net baseballs", "Game", "Pick", "Line", "Pick result"].map(q).join(",")];
+  const out = [["Ticket #", "Player #", "Player", "Name on ticket", "Placed", "Wager", "Picks", "Ticket result", "Net baseballs", "Game", "Pick", "Line", "Pick result"].map(q).join(",")];
   for (const t of state.allPicks || []) {
     const grade = gradeTicket(t, t.ticket_picks || [], games);
     for (const l of t.ticket_picks || []) {
       const g = games.get(l.game_id), r = pickResult(g, l);
-      out.push([t.number, t.name, t.placed_at, t.wager, t.legs, grade.label, grade.net, l.matchup, choiceLabel(g, l), l.line, r === true ? "Won" : r === false ? "Lost" : r === null ? "Push" : ""].map(q).join(","));
+      out.push([t.number, t.player_no || "", state.playerNames?.[t.player_no] || "", t.name, t.placed_at, t.wager, t.legs, grade.label, grade.net, l.matchup, choiceLabel(g, l), l.line, r === true ? "Won" : r === false ? "Lost" : r === null ? "Push" : ""].map(q).join(","));
     }
   }
   const url = URL.createObjectURL(new Blob([out.join("\n")], { type: "text/csv" }));
@@ -1015,14 +1031,14 @@ function lockedScreen() {
 
 let invites = [];
 async function loadInvites() {
-  const { data, error } = await db.from("invites").select("id,name,code,claimed_at,created_at,moves").order("created_at", { ascending: true });
+  const { data, error } = await db.from("invites").select("id,name,code,claimed_at,created_at,moves,player_no").order("created_at", { ascending: true });
   if (error) { $("#invite-status").textContent = "Couldn't load invites."; return; }
   invites = data; renderInvites();
 }
 function renderInvites() {
   const when = (t) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   $("#invite-list").innerHTML = invites.length ? invites.map((v) => `<div class="row invite-row">
-    <span class="t"><b>${esc(v.name)}</b><br><span class="r">${v.claimed_at ? `✓ In use on a device since ${esc(when(v.claimed_at))}${v.moves ? ` · moved to a new device ${v.moves} time${v.moves === 1 ? "" : "s"}` : ""}` : "Link not opened yet"}</span>
+    <span class="t"><b>${esc(v.name)}</b>${v.player_no ? ` <span class="r">· ${playerTag(v.player_no)}</span>` : ""}<br><span class="r">${v.claimed_at ? `✓ In use on a device since ${esc(when(v.claimed_at))}${v.moves ? ` · moved to a new device ${v.moves} time${v.moves === 1 ? "" : "s"}` : ""}` : "Link not opened yet"}</span>
     <input class="invite-link" readonly value="${esc(inviteLink(v.code))}"></span>
     <span class="invite-btns"><button class="pick primary" data-invite-copy="${esc(v.code)}">Copy link</button>
     <button class="pick" data-invite-reset="${v.id}">Reset</button><button class="pick danger" data-invite-remove="${v.id}">Remove</button></span></div>`).join("")
@@ -1032,7 +1048,7 @@ async function createInvite() {
   const name = $("#invite-name").value.trim();
   if (!name) { $("#invite-status").textContent = "Type the person's name first."; return; }
   $("#invite-status").textContent = "Creating…";
-  const { data, error } = await db.from("invites").insert({ name }).select("id,name,code,claimed_at,created_at,moves").single();
+  const { data, error } = await db.from("invites").insert({ name }).select("id,name,code,claimed_at,created_at,moves,player_no").single();
   if (error) { $("#invite-status").textContent = "Couldn't create the link. Try again."; return; }
   $("#invite-name").value = "";
   invites.push(data); renderInvites();

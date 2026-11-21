@@ -154,3 +154,10 @@ end;
 $$;
 revoke all on function public.reset_invite(bigint) from public;
 grant execute on function public.reset_invite(bigint) to authenticated;
+
+-- ---------- Player numbers ----------
+-- Every person gets a permanent player number (players.number) when they open their invite;
+-- every ticket is stamped with it (tickets.player_no), so same-named players can be told apart.
+-- (Applied in Supabase as migrations player_numbers_on_tickets and player_numbers_no_gaps.)
+alter table public.tickets add column if not exists player_no bigint;
+alter table public.invites add column if not exists player_no bigint;
